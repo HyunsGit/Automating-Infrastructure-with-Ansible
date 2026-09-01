@@ -12,7 +12,7 @@
 | **대상 환경** | KakaoCloud (Ubuntu 22.04 / 24.04, Rocky Linux 9) |
 | **주요 목적** | VM 초기 프로비저닝, 보안 강화, 모니터링 스택 배포, Puppet 전환 |
 | **연동 도구** | Prometheus, Grafana Loki, Filebeat, Promtail, Node Exporter |
-| **관련 프로젝트** | [Detecting Drifts in Infrastructure with Puppet](../puppet-portfolio) |
+| **관련 프로젝트** | [Detecting Drifts in Infrastructure with Puppet](https://github.com/HyunsGit/Detecting-Drifts-in-Infrastructure-with-Puppet) |
 
 ---
 
@@ -99,7 +99,7 @@ Puppet이 적용되지 않은 **모든 OS**(Ubuntu 22.04, 24.04, Rocky Linux 9 �
 | 4 | Puppet 에이전트 설치 및 Master 등록 | 이후 모든 설정은 Puppet이 관리 |
 | 5 | Timezone 동기화 | Asia/Seoul (KST) |
 
-> 계정 생성, 보안 설정, 모니터링 에이전트, NTP/DNS 설정 등은 Puppet `security_hardening` / `monitoring` / `time` / `networking` 모듈이 지속적으로 관리함. 자세한 내용은 [Puppet 포트폴리오](../puppet-portfolio)를 참고.
+> 계정 생성, 보안 설정, 모니터링 에이전트, NTP/DNS 설정 등은 Puppet `security_hardening` / `monitoring` / `time` / `networking` 모듈이 지속적으로 관리함. 자세한 내용은 [Puppet 포트폴리오](https://github.com/HyunsGit/Detecting-Drifts-in-Infrastructure-with-Puppet)를 참고.
 
 ---
 
