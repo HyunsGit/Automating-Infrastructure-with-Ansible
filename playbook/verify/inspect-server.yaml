@@ -1,0 +1,64 @@
+---
+- name: Server info
+  hosts: all
+  gather_facts: False
+  become: true
+  vars_prompt:
+    - name: project
+      prompt: "Enter current project: "
+      private: false
+  tasks:
+    - name: ansible delete file wildcard
+      ansible.builtin.find:
+        paths: /home/ubuntu/{{ project }}
+        patterns: "^{{ project }}.*.txt"
+        use_regex: true
+      register: wildcard_files_to_delete
+      when:
+        - inventory_hostname in groups.ops_log
+
+    - name: ansible remove file wildcard
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      with_items: "{{ wildcard_files_to_delete.files }}"
+      when:
+        - inventory_hostname in groups.ops_log
+
+    - name: inspect server hostname/timedate
+      ansible.builtin.shell: "hostnamectl | awk 'NR==1{print $3}' | tr -s \\n && timedatectl | grep -iE 'Universal|Seoul|Etc' | tr -s \\n && grep -c '<NTP_SERVER_IP>' /etc/systemd/timesyncd.conf | tr -s \\n"
+      register: inspect_server
+    
+    - name: display output of server hostname/timedate
+      ansible.builtin.debug:
+        var: inspect_server.stdout_lines
+
+    - name: add a line to a file
+      ansible.builtin.lineinfile:
+        path: /home/ubuntu/{{ project }}/{{ project }}.txt
+        line: "{{ inspect_server.stdout_lines }}"
+        create: yes
+      delegate_to: localhost
+
+    - name: extract hostname
+      ansible.builtin.shell: "cat /home/ubuntu/{{ project }}/{{ project }}.txt | awk '{print $1}' > /home/ubuntu/{{ project }}/{{ project }}-hostname.txt"
+      when:
+        - inventory_hostname in groups.ops_log
+
+    - name: extract unitime
+      ansible.builtin.shell: "cat /home/ubuntu/{{ project }}/{{ project }}.txt | awk '{print $3,$4,$5,$6,$7,$8}' > /home/ubuntu/{{ project }}/{{ project }}-unitime.txt"
+      when:
+        - inventory_hostname in groups.ops_log
+
+    - name: extract timezone
+      ansible.builtin.shell: "cat /home/ubuntu/{{ project }}/{{ project }}.txt | awk '{print $12,$13,$14}' > /home/ubuntu/{{ project }}/{{ project }}-timezone.txt"
+      when:
+        - inventory_hostname in groups.ops_log
+
+    - name: extract ntp status
+      ansible.builtin.shell: "cat /home/ubuntu/{{ project }}/{{ project }}.txt | awk '{print $15}' > /home/ubuntu/{{ project }}/{{ project }}-ntpstat.txt"
+      when:
+        - inventory_hostname in groups.ops_log
+
+
+

@@ -1,0 +1,102 @@
+---
+- name: update cloud init
+  hosts: all
+  become: true
+  tasks:
+    - name: delete deprecated NTP server IP(ubuntu)
+      ansible.builtin.shell: sudo sed -i '/<NTP_SERVER_IP>/d' /etc/systemd/timesyncd.conf
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"    
+    - name: delete deprecated NTP server IP(rocky)
+      ansible.builtin.shell: sudo sed -i '/pool 2.rocky.pool.ntp.org iburst/d' /etc/chrony.conf
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+
+    - name: verify if '<NTP_SERVER_IP>' ntp address already exists(ubuntu)
+      ansible.builtin.shell: cat /etc/systemd/timesyncd.conf | grep -c <NTP_SERVER_IP> || true
+      register: ntp_grep_deb
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+      # when:
+      #   - inventory_hostname not in groups.ops_log
+    - name: verify if '<NTP_SERVER_IP>' ntp address already exists(rocky)
+      ansible.builtin.shell: cat /etc/chrony.conf | grep -c <NTP_SERVER_IP> || true
+      register: ntp_grep_red
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+
+    - name: add config on timesyncd.conf(ubuntu)
+      ansible.builtin.blockinfile:
+        dest: /etc/systemd/timesyncd.conf
+        insertafter: '[Time]'
+        block: |
+          NTP=server <NTP_SERVER_IP>
+      when:
+        # - inventory_hostname not in groups.ops_log
+        - ansible_facts['distribution'] == "Ubuntu"
+        - ntp_grep_deb.stdout == "0"
+    - name: add config on chrony.conf(rocky)
+      ansible.builtin.blockinfile:
+        dest: /etc/chrony.conf
+        insertafter: '# Please consider joining the pool (https://www.pool.ntp.org/join.html).'
+        block: |
+          server infra-ntp-01.kc.kr2.internal.example.com iburst prefer
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+        - ntp_grep_red.stdout == "0"
+
+
+    - name: delete ansible block(ubuntu)
+      ansible.builtin.lineinfile:
+        path: /etc/systemd/timesyncd.conf
+        state: absent
+        regexp: 'ANSIBLE'
+      ignore_errors: true
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+        # - inventory_hostname not in groups.ops_log
+    - name: delete ansible block(rocky)
+      ansible.builtin.lineinfile:
+        path: /etc/chrony.conf
+        state: absent
+        regexp: 'ANSIBLE'
+      ignore_errors: true
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    
+    - name: force systemd to reread configs
+      ansible.builtin.systemd:
+        daemon_reload: yes
+
+
+    - name: restart timedatectl(ubuntu)
+      ansible.builtin.systemd:
+        state: restarted
+        name: systemd-timesyncd
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+        # - inventory_hostname not in groups.ops_log
+    - name: restart timedatectl(rocky)
+      ansible.builtin.systemd:
+        state: restarted
+        name: chronyd
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+        
+    - name: restart ryslog
+      ansible.builtin.systemd:
+        state: restarted
+        name: rsyslog
+      when:
+        - ansible_facts['distribution'] == "Rocky" or ansible_facts['distribution'] == "Ubuntu"
+
+
+    - name: copy ansible.log
+      ansible.builtin.command: mv /etc/ansible/logs/daily.log /etc/ansible/logs/{{ lookup('pipe', 'date +%m_%d_%y') }}/{{ lookup('pipe', 'date +%m%d%y.%H:%M:%S') }}.log
+      connection: local
+      ignore_errors: true
+      when:
+        - inventory_hostname in groups.ops_log

@@ -1,0 +1,25 @@
+---
+- hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: ICMP ping from Control Node to Remote Node
+      command: ping -c 2 "{{ inventory_hostname }}"
+      # Because it is an reporting task
+      changed_when: false 
+      check_mode: false
+      failed_when: router_ping.rc == 1 or router_ping.rc > 2 # will result into success for rc 0 and rc 2
+      register: router_ping
+
+    - name: Show Return Code
+      debug:
+        msg: "{{ router_ping.rc }}"
+
+    - name: copy ansible.log
+      ansible.builtin.command: mv /etc/ansible/logs/daily.log /etc/ansible/logs/{{ lookup('pipe', 'date +%m_%d_%y') }}/{{ lookup('pipe', 'date +%m%d%y.%H:%M:%S') }}.log
+      delegate_to: localhost
+      run_once: true
+      ignore_errors: true
+
+
+

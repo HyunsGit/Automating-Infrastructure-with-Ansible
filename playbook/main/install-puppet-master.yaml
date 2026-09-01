@@ -1,0 +1,222 @@
+---
+- hosts: all
+  become: yes
+  vars:
+    puppet_version: '8'
+    puppet_master_fqdn: 'test-puppet-server-01.internal.example.com'
+    puppet_master_port: 8140
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install Puppet release package for Noble
+      apt:
+        deb: "https://apt.puppet.com/puppet{{ puppet_version }}-release-noble.deb"
+        state: present
+      register: puppet_release
+
+    - name: Update apt cache after release package
+      apt:
+        update_cache: yes
+      when: puppet_release.changed
+
+    - name: Create puppet user/group BEFORE install
+      group:
+        name: puppet
+        state: present
+        system: yes
+
+    - name: Create puppet user
+      user:
+        name: puppet
+        groups: puppet
+        shell: /bin/bash
+        create_home: no
+        system: yes
+        home: /opt/puppetlabs/server/data/puppetserver
+
+    - name: Create puppet modules directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      loop:
+        - /usr/share/puppet/modules.available
+        - /usr/share/puppet/modules
+
+    - name: Purge any broken puppet packages first
+      apt:
+        name:
+          - puppetserver
+          - puppet-agent
+          - puppet-common
+          - puppet-module-*
+        state: absent
+        purge: yes
+        autoremove: yes
+        autoclean: yes
+      ignore_errors: yes
+
+    - name: Fix dpkg state
+      command: dpkg --configure -a
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Install Puppet Server AND puppet-agent (FULL install)
+      apt:
+        name:
+          - puppetserver
+          - puppet-agent
+        state: present
+        update_cache: yes
+        dpkg_options: 'force-confold,force-all'
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+        NEEDRESTART_MODE: a
+      register: puppet_install
+
+    - name: Wait for dpkg to finish configuring packages
+      pause:
+        seconds: 30
+      when: puppet_install.changed
+
+    - name: Force configure any pending packages
+      command: dpkg --configure -a
+      changed_when: false
+
+    - name: Verify Puppet Ruby libraries exist
+      stat:
+        path: /opt/puppetlabs/puppet/lib/ruby/vendor_ruby/puppet.rb
+      register: puppet_lib_check
+      failed_when: not puppet_lib_check.stat.exists
+
+    - name: Test Puppet Ruby load (fails if broken)
+      shell: /opt/puppetlabs/puppet/bin/ruby -e "require 'puppet'; exit 0"
+      changed_when: false
+
+    - name: Verify puppetserver binary exists (Ubuntu path)
+      stat:
+        path: /usr/bin/puppetserver
+      register: puppetserver_bin
+      failed_when: not puppetserver_bin.stat.exists
+
+    - name: Create Puppet Server config directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      loop:
+        - /etc/puppetlabs/puppetserver/conf.d
+        - /etc/puppetlabs/puppetserver/ssl
+        - /etc/puppetlabs/code/environments/production/manifests
+        - /etc/puppetlabs/code/environments/production/hieradata
+        - /opt/puppetlabs/server/data/puppetserver
+
+    - name: Configure Puppet Server memory and JRuby pool
+      copy:
+        content: |
+          [puppetserver]
+          server-id = {{ puppet_master_fqdn }}
+
+          [jvm]
+              max-heap-size = 512m
+              min-heap-size = 256m
+              jruby-puppet-max-pooled-instances = 2
+              jruby-puppet-min-pooled-instances = 1
+        dest: /etc/puppetlabs/puppetserver/conf.d/puppetserver.conf
+      notify: restart puppetserver
+
+    - name: Configure puppet.conf
+      ini_file:
+        path: /etc/puppetlabs/puppet/puppet.conf
+        section: agent
+        option: "{{ item.option }}"
+        value: "{{ item.value }}"
+      loop:
+        - { option: 'server', value: "{{ puppet_master_fqdn }}" }
+        - { option: 'environment', value: 'production' }
+        - { option: 'runinterval', value: '1800' }
+      notify: restart puppetserver
+
+    - name: Set JAVA_ARGS for small instances
+      copy:
+        content: |
+          PUPPET_SERVER_JAVA_ARGS="-Xms256m -Xmx512m -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
+        dest: /etc/default/puppetserver
+      notify: restart puppetserver
+
+    - name: Setup Hiera config
+      copy:
+        content: |
+          ---
+          :backends: yaml
+          :yaml:
+            :datadir: /etc/puppetlabs/code/environments/%{environment}/hieradata
+          :hierarchy:
+            - "nodes/%{::certname}"
+            - common
+        dest: /etc/puppetlabs/code/hiera.yaml
+      notify: restart puppetserver
+
+    - name: Default hieradata
+      copy:
+        content: |
+          ntp::servers: ['pool.ntp.org']
+          base_packages:
+            - vim
+            - htop
+            - curl
+        dest: /etc/puppetlabs/code/environments/production/hieradata/common.yaml
+
+    - name: Increase system limits
+      lineinfile:
+        path: /etc/security/limits.conf
+        line: "{{ item }}"
+      loop:
+        - "puppet  -  nofile  65536"
+        - "*  -  memlock  250000"
+
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: Disable puppet agent service on master
+      systemd:
+        name: puppet
+        state: stopped
+        enabled: no
+      ignore_errors: yes
+
+    - name: Enable and start Puppet Server
+      systemd:
+        name: puppetserver
+        state: started
+        enabled: yes
+
+    - name: Wait for Puppet Server to be ready
+      uri:
+        url: "https://{{ puppet_master_fqdn }}:{{ puppet_master_port }}/status/v1/services"
+        method: GET
+        validate_certs: no
+        status_code: 200
+      register: puppet_status
+      until: puppet_status.status == 200
+      retries: 12
+      delay: 10
+
+    - name: Verify Puppet CA is ready
+      command: puppet config print cacert --server={{ puppet_master_fqdn }}
+      register: ca_check
+      changed_when: false
+
+  handlers:
+    - name: restart puppetserver
+      systemd:
+        name: puppetserver
+        state: restarted

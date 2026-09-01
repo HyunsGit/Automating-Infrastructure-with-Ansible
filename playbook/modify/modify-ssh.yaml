@@ -1,0 +1,7 @@
+---
+- name: update cloudimg for ssh
+  hosts: all
+  become: true
+  tasks:
+    - name: Allow password authentication for SSH   # SSH 패스워드 방식 허용
+      ansible.builtin.shell: sudo sed -i 's/#PasswordAuthentication\ yes/PasswordAuthentication\ yes/g' /etc/ssh/sshd_config 

@@ -1,0 +1,103 @@
+---
+- name: Install Promtail
+  hosts: all
+  become: true
+  tasks:
+    - name: Update all packages to their latest version
+      ansible.builtin.apt:
+        name: "*"
+        state: latest
+      ignore_errors: true
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+        
+    - name: Install mandatory packages(Ubuntu)   # 패키지 설치(Ubuntu)
+      ansible.builtin.apt:
+        pkg:
+        - nfs-common
+        - net-tools
+        - dnsutils
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Update installed packages(Rocky)    # 패키지 업데이트(Rocky)
+      ansible.builtin.dnf:
+        state: latest
+        update_only: true
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+        
+    - name: Enable devel(Rocky)    # 추가 패키지 설치를 위한 repo 활성화(Rocky)
+      community.general.dnf_config_manager:
+        name: devel
+        state: enabled
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: Install mandatory packages(Rocky)    # 필수 패키지 설치(Rocky)
+      ansible.builtin.dnf:
+        name:
+          - yum-utils
+          - dnsutils
+          - nc
+          - redhat-lsb-core          
+          - net-tools
+          - nfs-utils
+          - vim
+        state: latest
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: Copy promtail executable file
+      ansible.builtin.copy:
+        src: /etc/ansible/packages/promtail-linux-amd64
+        dest: /home/scv
+        owner: scv
+        group: scv
+        mode: '0755'
+
+    - name: Move promtail executable under /usr/local/bin
+      ansible.builtin.shell:
+        cmd: sudo cp /home/scv/promtail-linux-amd64 /usr/local/bin/promtail
+
+    - name: Create a directory for promtail
+      ansible.builtin.file:
+        path: /etc/promtail
+        state: directory
+        mode: '0755'
+
+    - name: Create a directory for promtail
+      ansible.builtin.file:
+        path: /etc/promtail/logs
+        state: directory
+        mode: '0755'
+
+    - name: Copy promtail executable file
+      ansible.builtin.copy:
+        src: /etc/ansible/roles/promtail.cfg
+        dest: /etc/promtail/promtail-config.yaml
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Copy promtail executable file
+      ansible.builtin.copy:
+        src: /etc/ansible/roles/promtail.service
+        dest: /etc/systemd/system
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: force systemd to reread configs
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: restart promtail
+      ansible.builtin.systemd:
+        state: restarted
+        name: promtail
+
+    - name: enable promtail
+      ansible.builtin.systemd:
+        name: promtail
+        enabled: true        

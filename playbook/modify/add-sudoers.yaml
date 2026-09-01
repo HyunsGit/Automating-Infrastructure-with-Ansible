@@ -1,0 +1,32 @@
+---
+- name: add user to sudoers
+  hosts: all
+  become: true
+  tasks:
+    - name: append users to sudoers
+      ansible.builtin.shell: echo "deploy  ALL=(ALL) NOPASSWD:ALL" | sudo tee -a /etc/sudoers
+      # when:
+      #   "'connect_message_vm' in group_names"
+      ignore_errors: true
+      when:
+        - inventory_hostname not in groups.ops_log
+    # - name: delete user from sudoers
+    #   ansible.builtin.shell: sed -i '/deploy/d' /etc/sudoers
+    #   ignore_errors: true
+    - name: inspect sudoers file
+      ansible.builtin.shell: tail -3 /etc/sudoers
+      ignore_errors: true    
+      register: result
+      when:
+        - inventory_hostname not in groups.ops_log
+
+    - name: print result
+      ansible.builtin.debug:
+        var: result.stdout_lines
+      when:
+        - inventory_hostname not in groups.ops_log
+
+    - name: copy ansible.log
+      ansible.builtin.command: mv /etc/ansible/logs/daily.log /etc/ansible/logs/{{ lookup('pipe', 'date +%m_%d_%y') }}/{{ lookup('pipe', 'date +%m%d%y.%H:%M:%S') }}.log
+      connection: local
+      ignore_errors: true

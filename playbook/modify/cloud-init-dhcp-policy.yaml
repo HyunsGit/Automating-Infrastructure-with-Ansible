@@ -1,0 +1,45 @@
+---
+- name: update cloud init
+  hosts: all
+  become: true
+  tasks:
+    - name: verify if 'critical=true' already exists
+      ansible.builtin.shell: grep -c "critical" /etc/netplan/50-cloud-init.yaml || true
+      register: critical_grep
+      when:
+        - inventory_hostname not in groups.ops_log
+
+    - name: add config on cloud init
+      ansible.builtin.blockinfile:
+        dest: /etc/netplan/50-cloud-init.yaml
+        insertafter: 'dhcp4:'
+        block: |
+          {% filter indent(width=12, first=true) %}
+          critical: true
+          {% endfilter %}
+      when:
+        - inventory_hostname not in groups.ops_log
+        - critical_grep.stdout == "0"
+
+    - name: delete ansible block
+      ansible.builtin.lineinfile:
+        path: /etc/netplan/50-cloud-init.yaml
+        state: absent
+        regexp: 'ANSIBLE'
+      ignore_errors: true
+      when:
+        - inventory_hostname not in groups.ops_log
+
+    - name: netplan apply
+      ansible.builtin.shell: netplan apply
+      async: 5
+      poll: 0
+      when:
+        - inventory_hostname not in groups.ops_log
+
+    - name: copy ansible.log
+      ansible.builtin.command: mv /etc/ansible/logs/daily.log /etc/ansible/logs/{{ lookup('pipe', 'date +%m_%d_%y') }}/{{ lookup('pipe', 'date +%m%d%y.%H:%M:%S') }}.log
+      connection: local
+      ignore_errors: true
+      when:
+        - inventory_hostname in groups.ops_log

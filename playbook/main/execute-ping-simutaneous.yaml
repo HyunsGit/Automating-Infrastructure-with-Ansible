@@ -1,0 +1,13 @@
+- name: Ping inventory hosts and collect results
+  hosts: all
+  gather_facts: no
+
+  tasks:
+    - name: Perform ICMP ping to 8.8.8.8
+      ansible.builtin.shell: ping -c 4 8.8.8.8
+      register: ping_result
+      ignore_errors: yes
+
+    - name: Print ping result per host
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: {{ ping_result.stdout }}"

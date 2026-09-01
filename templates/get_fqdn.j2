@@ -1,0 +1,13 @@
+{% for host in groups['all'] %}
+--------------------------------
+hostname: {{ ansible_facts['hostname'] }}
+fqdn: {{ ansible_facts['fqdn'] }}
+nameserver: {{ ansible_facts['dns']['nameservers'] }}
+python-version: {{ ansible_facts['python_version'] }}
+python-exec: {{ ansible_facts['python']['executable'] }}
+search-dns: {{ ansible_facts['dns']['search'] }}
+ubuntu-lsb: {{ ansible_facts['lsb']['codename'] }}
+selinux: {{ ansible_facts['selinux']['status'] }}
+timezone: {{ ansible_facts['date_time']['tz'] }}
+--------------------------------
+{% endfor %}

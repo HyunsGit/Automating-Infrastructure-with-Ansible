@@ -1,0 +1,266 @@
+---
+- name: Update Hostname   # Host명 변경 태스크
+  hosts: all
+  become: true
+  tasks:
+    - name: "update hostnames" # Host명 변경
+      hostname:
+        name: "{{ inventory_hostname }}"
+
+
+- name: Create Default OS users   # 기본 OS 계정 생성 태스크
+  hosts: all
+  become: true
+  tasks:
+    - name: Determine available users   # OS 내 계정 조회
+      getent:
+        database: passwd
+
+    - name: Set fact when OS users exist   # 기본 OS 계정이 있을 때 변수 지정
+      set_fact:
+        existence: ex
+      when: '"scv" in item.key or "probe" in item.key or "drone" in item.key or "marine" in item.key or "zealot" in item.key'
+      loop: "{{ ansible_facts.getent_passwd | dict2items }}"
+
+    - name: Set fact when OS users do not exist    # 기본 OS 계정이 없을 때 변수 지정
+      set_fact:
+        existence: notex
+      when: '"scv" not in item.key or "probe" not in item.key or "drone" not in item.key or "marine" not in item.key or "zealot" not in item.key'
+      loop: "{{ ansible_facts.getent_passwd | dict2items }}"
+
+    - name: Ensure user groups exist with matching GID  # 그룹 생성 및 GID 명시
+      ansible.builtin.group:
+        name: "{{ item.group }}"
+        gid: "{{ item.gid }}"
+        state: present
+      loop:
+        - { group: scv, gid: 300 }
+        - { group: probe, gid: 301 }
+        - { group: drone, gid: 302 }
+        - { group: marine, gid: 303 }
+        - { group: zealot, gid: 304 }
+
+    - name: Add default OS users with matching GID primary group  # 사용자 생성 및 Primary Group 지정
+      ansible.builtin.user:
+        name: "{{ item.user }}"
+        uid: "{{ item.uid }}"
+        group: "{{ item.user }}"    # 그룹명과 사용자명이 같음
+        password: "{{ item.pw | password_hash('sha512') }}"
+        create_home: true
+        system: false
+        shell: /bin/bash
+      when:
+        - existence == 'notex'
+      loop:
+        - { user: scv, uid: 300, pw: "<REDACTED>" }
+        - { user: probe, uid: 301, pw: "<REDACTED>" }
+        - { user: drone, uid: 302, pw: "<REDACTED>" }
+        - { user: marine, uid: 303, pw: "<REDACTED>" }
+        - { user: zealot, uid: 304, pw: "<REDACTED>" }
+
+- name: Change Group Ownership for Home Directory
+  hosts: all
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Change Group Ownership for Home Directory
+      ansible.builtin.file:
+        path: "/home/{{ item.path }}"
+        state: directory
+        recurse: yes
+        owner: "{{ item.owner }}"
+        group: "{{ item.group }}"
+      loop:
+        - { path: scv, owner: scv, group: scv }
+        - { path: probe, owner: probe, group: probe }
+        - { path: drone, owner: drone, group: drone }
+        - { path: marine, owner: marine, group: marine }
+        - { path: zealot, owner: zealot, group: zealot }
+      ignore_errors: true
+
+    - name: Check if scv(인프라팀) defined in sudoers
+      ansible.builtin.lineinfile:
+        state: absent
+        path: "/etc/sudoers"
+        regexp: "^scv"
+      check_mode: true
+      changed_when: false
+      register: scv
+
+    - name: Check if probe(보안팀) defined in sudoers
+      ansible.builtin.lineinfile:
+        state: absent
+        path: "/etc/sudoers"
+        regexp: "^probe"
+      check_mode: true
+      changed_when: false
+      register: probe
+
+    - name: Check if drone(DB팀) defined in sudoers
+      ansible.builtin.lineinfile:
+        state: absent
+        path: "/etc/sudoers"
+        regexp: "^drone"
+      check_mode: true
+      changed_when: false
+      register: drone
+
+    - name: Check if marine(개발팀) defined in sudoers
+      ansible.builtin.lineinfile:
+        state: absent
+        path: "/etc/sudoers"
+        regexp: "^marine"
+      check_mode: true
+      changed_when: false
+      register: marine
+
+    - name: Check if zealot(외주) defined in sudoers
+      ansible.builtin.lineinfile:
+        state: absent
+        path: "/etc/sudoers"
+        regexp: "^zealot"
+      check_mode: true
+      changed_when: false
+      register: zealot
+
+    - name: Grant sudoers if not defined(scv)
+      ansible.builtin.lineinfile:
+        state: present
+        path: "/etc/sudoers"
+        line: "scv  ALL=(ALL) NOPASSWD:ALL"
+      when: scv.found == 0
+
+    - name: Grant sudoers if not defined(probe)
+      ansible.builtin.lineinfile:
+        state: present
+        path: "/etc/sudoers"
+        line: "probe  ALL=(ALL) NOPASSWD:ALL"
+      when: probe.found == 0
+
+    - name: Grant sudoers if not defined(drone)
+      ansible.builtin.lineinfile:
+        state: present
+        path: "/etc/sudoers"
+        line: "drone  ALL=(ALL) NOPASSWD:ALL"
+      when: drone.found == 0
+
+    - name: Grant sudoers if not defined(marine)
+      ansible.builtin.lineinfile:
+        state: present
+        path: "/etc/sudoers"
+        line: "marine  ALL=(ALL) NOPASSWD:ALL"
+      when: marine.found == 0
+
+    - name: Grant sudoers if not defined(zealot)
+      ansible.builtin.lineinfile:
+        state: present
+        path: "/etc/sudoers"
+        line: "zealot  ALL=(ALL) NOPASSWD:ALL"
+      when: zealot.found == 0
+
+    - name: Check if 'Banner' exists in /etc/ssh/sshd_config
+      ansible.builtin.lineinfile:
+        state: absent
+        path: "/etc/ssh/sshd_config"
+        regexp: "^Banner"
+      check_mode: true
+      changed_when: false
+      register: banner
+
+    - name: Delete deprecated AllowUsers
+      ansible.builtin.shell: sudo sed -i '/AllowUsers/d' /etc/ssh/sshd_config
+
+    - name: Allow password authentication for SSH
+      ansible.builtin.shell: sudo sed -i 's/PasswordAuthentication\ no/PasswordAuthentication\ yes/g' /etc/ssh/sshd_config
+
+    - name: Define 'Banner' if not exists
+      ansible.builtin.lineinfile:
+        state: present
+        path: "/etc/ssh/sshd_config"
+        line: "Banner /etc/issue"
+      when: banner.found == 0
+
+    - name: Add AllowUsers in sshd_config(Ubuntu)
+      ansible.builtin.lineinfile:
+        dest: /etc/ssh/sshd_config
+        line: "AllowUsers scv probe drone marine zealot ubuntu"
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Add AllowUsers in sshd_config(Rocky)
+      ansible.builtin.lineinfile:
+        dest: /etc/ssh/sshd_config
+        line: "AllowUsers scv probe drone marine zealot rocky"
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+
+    - name: Allow password authentication for SSH
+      ansible.builtin.shell: sudo sed -i 's/PasswordAuthentication\ no/PasswordAuthentication\ yes/g' /etc/ssh/sshd_config
+
+- name: Update cloudimg for ssh(Ubuntu)   # Password Authentication SSH 허용(Ubuntu)
+  hosts: all
+  become: true
+  tasks:
+    - name: Verify if 'PasswordAuthentication yes' already exists   # Password Authentication가 활성화 되어 있는지 확인
+      ansible.builtin.shell: grep -c "PasswordAuthentication yes" /etc/ssh/sshd_config.d/60-cloudimg-settings.conf  || true
+      register: auth_yes
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Add config on cloudimg    # Password Authentication 비활성화 시 활성화로 변경
+      ansible.builtin.blockinfile:
+        dest: /etc/ssh/sshd_config.d/60-cloudimg-settings.conf
+        insertafter: 'PasswordAuthentication no'
+        block: |
+          PasswordAuthentication yes
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+        - auth_yes.stdout == "0"
+
+    - name: Remove deprecated line for sshd_config   # Password Authentication 비활성화 라인 제거
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config.d/60-cloudimg-settings.conf
+        state: absent
+        regexp: 'no'
+      ignore_errors: true
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Delete ansible block    # Ansible block 주석 제거
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config.d/60-cloudimg-settings.conf
+        state: absent
+        regexp: 'ANSIBLE'
+      ignore_errors: true
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Restart sshd    # Ubuntu 20,22용 ssh 서비스 재시작
+      ansible.builtin.systemd:
+        state: restarted
+        name: sshd
+      ignore_errors: true
+      when:
+        - (ansible_facts['distribution'] == "Ubuntu" and ansible_facts['distribution_major_version'] == "18") or (ansible_facts['distribution'] == "Ubuntu" and ansible_facts['distribution_major_version'] == "20") or (ansible_facts['distribution'] == "Ubuntu" and ansible_facts['distribution_major_version'] == "22")
+
+    - name: Restart sshd for ubuntu 24    # Ubuntu 24용 ssh 서비스 재시작
+      ansible.builtin.systemd:
+        state: restarted
+        name: ssh
+      ignore_errors: true
+      when: (ansible_facts['distribution'] == "Ubuntu" and ansible_facts['distribution_major_version'] == "24")
+
+    # - name: Check if 'Banner' exists in /etc/ssh/sshd_config    # SSH 배너 존재 유무 확인
+    #   ansible.builtin.lineinfile:
+    #     state: absent
+    #     path: "/etc/ssh/sshd_config"
+    #     regexp: "^Banner"
+    #   check_mode: true
+    #   changed_when: false
+    #   register: banner
+
+    - name: copy ansible.log
+      ansible.builtin.command: mv /etc/ansible/logs/daily.log /etc/ansible/logs/{{ lookup('pipe', 'date +%m_%d_%y') }}/{{ lookup('pipe', 'date +%m%d%y.%H:%M:%S') }}.log
+      connection: local
+      ignore_errors: true

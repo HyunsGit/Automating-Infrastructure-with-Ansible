@@ -1,0 +1,45 @@
+---
+- name: Verify VM disk partitions exist
+  hosts: all  # Target your VM group/inventory
+  gather_facts: yes
+  become: yes
+
+  tasks:
+    - name: Check required partitions
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /dev/vdb1
+        - /dev/vdc1
+        - /dev/vdd1
+      register: partition_stats
+      changed_when: false
+
+    - name: Set fact for missing partitions
+      ansible.builtin.set_fact:
+        missing_partitions: >-
+          {{
+            partition_stats.results
+            | rejectattr('stat.exists', 'equalto', true)
+            | map(attribute='item')
+            | list
+          }}
+      changed_when: false
+
+    - name: Report missing partitions
+      ansible.builtin.debug:
+        msg: "Host {{ inventory_hostname }} missing: {{ missing_partitions | default('None') }}"
+      when: missing_partitions | length > 0
+
+    - name: All partitions present
+      ansible.builtin.debug:
+        msg: "Host {{ inventory_hostname }} has all required partitions (/dev/vdb1, /dev/vdc1, /dev/vdd1)"
+      when: missing_partitions | length == 0
+
+  post_tasks:
+    - name: Summary of compliant hosts
+      ansible.builtin.debug:
+        msg: "{{ groups['all'] | difference(ansible_play_hosts_all | map('extract', hostvars, 'missing_partitions') | select('length') | map('regex_replace', '.*', '') | list) }}"
+      delegate_to: localhost
+      run_once: true
+      when: not (missing_partitions is not defined or missing_partitions | length == 0)

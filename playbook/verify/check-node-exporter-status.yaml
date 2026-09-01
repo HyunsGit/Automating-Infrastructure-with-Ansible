@@ -1,0 +1,32 @@
+---
+- name: Check Node Exporter Status(Changed Status when node exporter is NOT installed)
+  hosts: all
+  gather_facts: true
+  become: true
+
+  tasks:
+    - name: Check Node Exporter Status
+      block:
+        - name: ping hosts
+          ping:
+          register: connection_test
+          ignore_errors: yes
+          ignore_unreachable: yes
+        - name: Check if Service Exists
+          stat: 
+            path: /etc/systemd/system/node_exporter.service
+          register: node_exporter_status
+        - name: Check for node_exporter status
+          service_facts:
+        - debug:
+            var: ansible_facts.services["node_exporter.service"]
+          changed_when: ansible_facts.services["node_exporter.service"].state == "stopped"
+      rescue:
+        - name: verify node_exporter existence    
+          when: node_exporter_status.stat.exists == False
+          ansible.builtin.debug:
+            msg: node_exporter service not installed!!
+        - name: connection rescue
+          when: connection_test.unreachable is defined or connection_test.rc != 0
+          ansible.builtin.debug:
+            msg: server not reachable

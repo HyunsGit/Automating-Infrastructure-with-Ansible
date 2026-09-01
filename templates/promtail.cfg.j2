@@ -1,0 +1,33 @@
+server:
+{% filter indent(width=2, first=true) %}
+http_listen_port: 39080
+grpc_listen_port: 0
+{% endfilter %}
+
+positions:
+{% filter indent(width=2, first=true) %}
+filename: /etc/promtail/positions.yaml
+{% endfilter %}
+
+clients:
+{% filter indent(width=2, first=true) %}
+- url: http://infra-grafana-01:3100/loki/api/v1/push
+{% endfilter %}
+scrape_configs:
+{% filter indent(width=2, first=true) %}
+- job_name: system
+{% filter indent(width=2, first=true) %}
+static_configs:
+- targets:
+{% filter indent(width=4, first=true) %}
+- '{{ inventory_hostname }}'
+{% endfilter %}
+{% endfilter %}
+{% endfilter %}
+{% filter indent(width=6, first=true) %}
+labels:
+{% filter indent(width=2, first=true) %}
+job: varlogs
+__path__: /var/log/*log
+{% endfilter %}
+{% endfilter %}

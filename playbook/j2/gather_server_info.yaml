@@ -1,0 +1,11 @@
+---
+- name: get server metadata
+  hosts: all
+  become: true
+  tasks:
+  - name: gather server metadata
+    template:
+      src: /etc/ansible/templates/get_hostname+ip.j2
+      dest: /home/ubuntu/server_spec.txt
+    delegate_to: localhost
+    ignore_errors: true

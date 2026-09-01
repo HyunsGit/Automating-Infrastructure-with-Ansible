@@ -1,0 +1,43 @@
+---
+- name: Test SSH connectivity and recreate inventory
+  hosts: all
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Test SSH connectivity
+      ansible.builtin.ping:
+      register: ssh_test
+      ignore_unreachable: true
+
+    # - name: Create new inventory file
+    #   ansible.builtin.file:
+    #     path: /etc/ansible/inventory/prometheus/kr2-reachable.ini
+    #     state: touch
+
+    # - name: Add header to inventory file
+    #   ansible.builtin.lineinfile:
+    #     path: /etc/ansible/inventory/prometheus/kr2-reachable.ini
+    #     line: "[reachable_vms]"
+    #     insertafter: EOF
+
+    - name: Add reachable hosts to inventory file
+      ansible.builtin.lineinfile:
+        path: /etc/ansible/inventory/prometheus/kr2-reachable.ini
+        line: "{{ inventory_hostname }}"
+        insertafter: "[reachable_vms]"
+      when: ssh_test.ping is defined
+
+    - name: Add group variables to inventory file
+      ansible.builtin.lineinfile:
+        path: /etc/ansible/inventory/prometheus/kr2-reachable.ini
+        line: |
+          [all:vars]
+          ansible_connection=ssh
+          ansible_user=scv
+          ansible_ssh_pass={{ vault_default_ssh_pass }}
+        insertafter: EOF
+
+    - name: copy ansible.log
+      ansible.builtin.command: mv /etc/ansible/logs/daily.log /etc/ansible/logs/{{ lookup('pipe', 'date +%m_%d_%y') }}/{{ lookup('pipe', 'date +%m%d%y.%H:%M:%S') }}.log
+      connection: local
+      ignore_errors: true

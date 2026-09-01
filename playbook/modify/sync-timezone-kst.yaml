@@ -1,0 +1,95 @@
+- name: Set Time Zone   # Timezone 동기화(KST)
+  hosts: all
+  become: true
+  vars:                 # 사전에 사용 할 변수 지정
+  - my_zone: 'Asia/Seoul'
+
+  tasks:
+    - name: Show facts available on the system    # ansible_facts 조회
+      ansible.builtin.debug:
+        var: ansible_facts
+
+    - name: Check current timezone    # 현재 서버 timezone 확인
+      ansible.builtin.shell: cat /etc/timezone
+      register: current_zone_deb
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Display output of current timezone    # 현재 서비 timezone 표시
+      ansible.builtin.debug:
+        var: current_zone_deb.stdout_lines
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Check current timezone    # 현재 서버 timezone 확인
+      ansible.builtin.shell: cat /etc/localtime
+      register: current_zone_red
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: Display output of current timezone    # 현재 서비 timezone 표시
+      ansible.builtin.debug:
+        var: current_zone_red.stdout_lines
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: Set timezone variables    # timezone용 변수 지정
+      ansible.builtin.copy: content={{my_zone}}
+            dest=/etc/timezone
+            owner=root
+            group=root
+            mode=0644
+            backup=yes
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+        - current_zone_deb.stdout != my_zone
+      notify:
+        - update timezone
+
+    - name: Ensure correct timezone link is set   # timezone 설정파일 symbolic link 생성
+      ansible.builtin.file:
+        src: '/usr/share/zoneinfo/{{my_zone}}'
+        dest: /etc/localtime
+        owner: root
+        group: root
+        state: link
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Set timezone to Asia/Seoul    # timezone Asia/Seoul로 지정
+      community.general.timezone:
+        name: Asia/Seoul
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: Display output of updated timezone    # Up-to-date timezone 결과값 변수로 지정
+      ansible.builtin.shell: timedatectl | grep "Time zone"
+      register: modified_zone
+
+    - name: Display output of modified timezone   # Up-to-date timezone 표시
+      ansible.builtin.debug:
+        var: modified_zone.stdout_lines
+
+    - name: restart ryslog
+      ansible.builtin.systemd:
+        state: restarted
+        name: rsyslog
+      when:
+        - ansible_facts['distribution'] == "Rocky" or ansible_facts['distribution'] == "Ubuntu"
+
+    - name: restart cron
+      ansible.builtin.systemd:
+        state: restarted
+        name: cron
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: copy ansible.log
+      ansible.builtin.command: mv /etc/ansible/logs/daily.log /etc/ansible/logs/{{ lookup('pipe', 'date +%m_%d_%y') }}/{{ lookup('pipe', 'date +%m%d%y.%H:%M:%S') }}.log
+      delegate_to: localhost
+      run_once: true
+      ignore_errors: true
+
+  handlers:
+    - name: update timezone   # timezone 설정 적용
+      command: dpkg-reconfigure --frontend noninteractive tzdata

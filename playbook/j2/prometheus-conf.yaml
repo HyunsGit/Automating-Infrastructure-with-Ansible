@@ -1,0 +1,24 @@
+---
+- name: Template for Prometheus conf
+  hosts: all
+  become: true
+  gather_facts: false
+  # ignore_unreachable: yes
+  tasks:
+    - name: Gather hostname fact
+      ansible.builtin.setup:
+        filter:
+          - hostname
+          - default_ipv4
+
+  # - name: skip unreachable host
+  #   ansible.builtin.meta: clear_host_errors
+
+    - name: Create Prometheus.yml
+      template:
+        # src: /etc/ansible/templates/v2-prometheus.conf0220.j2
+        src: /etc/ansible/templates/simplied-prometheus.conf.j2
+        dest: /etc/prometheus/prometheus.yml
+      delegate_to: infra-prometheus-01
+      ignore_errors: true
+      # when: ansible_facts is defined

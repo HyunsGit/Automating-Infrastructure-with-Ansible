@@ -1,0 +1,97 @@
+---
+- name: Set Time Zone
+  hosts: all
+  become: true
+  vars:
+  - my_zone: 'UTC'
+
+  tasks:
+    - name: Show facts available on the system
+      ansible.builtin.debug:
+        var: ansible_facts
+         
+    - name: check current timezone
+      ansible.builtin.shell: cat /etc/timezone
+      register: current_zone_deb
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+    
+    - name: Display output of current timezone
+      ansible.builtin.debug:
+        var: current_zone_deb.stdout_lines
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    
+    - name: check current timezone
+      ansible.builtin.shell: cat /etc/localtime
+      register: current_zone_red
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: Display output of current timezone
+      ansible.builtin.debug:
+        var: current_zone_red.stdout_lines
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: Set timezone variables
+      ansible.builtin.copy: content={{my_zone}}
+            dest=/etc/timezone
+            owner=root
+            group=root
+            mode=0644
+            backup=yes
+      when: 
+        - ansible_facts['distribution'] == "Ubuntu"
+        - current_zone_deb.stdout != my_zone
+      notify:
+        - update timezone
+        
+    - name: ensure correct timezone link is set
+      ansible.builtin.file:
+        src: '/usr/share/zoneinfo/{{my_zone}}'
+        dest: /etc/localtime
+        owner: root
+        group: root
+        state: link
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Set timezone to Asia/Seoul
+      community.general.timezone:
+        name: Asia/Seoul
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: Display output of updated timezone
+      ansible.builtin.shell: timedatectl | grep "Time zone"
+      register: modified_zone
+    
+    - name: Display output of modified timezone
+      ansible.builtin.debug:
+        var: modified_zone.stdout_lines
+
+    - name: restart ryslog
+      ansible.builtin.systemd:
+        state: restarted
+        name: rsyslog
+      when:
+        - ansible_facts['distribution'] == "Rocky" or ansible_facts['distribution'] == "Ubuntu"
+
+    - name: restart cron
+      ansible.builtin.systemd:
+        state: restarted
+        name: cron
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+  #   - name: copy ansible.log
+  #     ansible.builtin.command: mv /etc/ansible/logs/daily.log /etc/ansible/logs/{{ lookup('pipe', 'date +%m%d%y') }}/{{ lookup('pipe', 'date +%m%d%y.%H:%M:%S') }}.log
+  #     connection: local
+  #     ignore_errors: true
+  #     when:
+  #       - inventory_hostname in groups.ops_log
+
+  handlers:
+    - name: update timezone
+      command: dpkg-reconfigure --frontend noninteractive tzdata

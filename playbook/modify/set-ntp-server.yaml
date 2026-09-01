@@ -1,0 +1,82 @@
+- name: Register NTP Server   # NTP 서버 등록
+  hosts: all
+  become: true
+  tasks:
+    - name: Remove deprecated NTP server IP(Ubuntu)   # Deprecated된 NTP 서버 IP 제거(Ubuntu)
+      ansible.builtin.shell: sudo sed -i '/<NTP_SERVER_IP>/d' /etc/systemd/timesyncd.conf
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"    
+
+    - name: Remove deprecated NTP server IP(Rocky)    # Deprecated된 NTP 서버 IP 제거(Rocky)
+      ansible.builtin.shell: sudo sed -i '/pool 2.rocky.pool.ntp.org iburst/d' /etc/chrony.conf
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: Verify if '<NTP_SERVER_IP>' ntp address already exists(Ubuntu)   # Up-to-date NTP 서버 IP 주소 유무 확인(Rocky)
+      ansible.builtin.shell: cat /etc/systemd/timesyncd.conf | grep -c <NTP_SERVER_IP> || true
+      register: ntp_grep_deb
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Verify if '<NTP_SERVER_IP>' ntp address already exists(Rocky)    # Up-to-date NTP 서버 IP 주소 유무 확인(Rocky)
+      ansible.builtin.shell: cat /etc/chrony.conf | grep -c <NTP_SERVER_IP> || true
+      register: ntp_grep_red
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: Add config on timesyncd.conf(Ubuntu)    # Up-to-date NTP 서버 IP 주소 timesyncd.conf에 추가(Ubuntu)
+      ansible.builtin.blockinfile:
+        dest: /etc/systemd/timesyncd.conf
+        insertafter: '[Time]'
+        block: |
+          NTP=server <NTP_SERVER_IP>
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+        - ntp_grep_deb.stdout == "0"
+
+    - name: Add config on chrony.conf(Rocky)    # Up-to-date NTP 서버 IP 주소 timesyncd.conf에 추가(Rocky)
+      ansible.builtin.blockinfile:
+        dest: /etc/chrony.conf
+        insertafter: '# Please consider joining the pool (https://www.pool.ntp.org/join.html).'
+        block: |
+          server infra-ntp-01.kc.kr2.internal.example.com iburst prefer
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+        - ntp_grep_red.stdout == "0"
+
+    - name: Delete ansible block(Ubuntu)    # Ansible block 주석 제거(Ubuntu)
+      ansible.builtin.lineinfile:
+        path: /etc/systemd/timesyncd.conf
+        state: absent
+        regexp: 'ANSIBLE'
+      ignore_errors: true
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+        
+    - name: Delete ansible block(Rocky)   # Ansible block 주석 제거(Rocky)
+      ansible.builtin.lineinfile:
+        path: /etc/chrony.conf
+        state: absent
+        regexp: 'ANSIBLE'
+      ignore_errors: true
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+  
+    - name: Force systemd to reread configs   # 서비스 데몬 리로드
+      ansible.builtin.systemd:
+        daemon_reload: yes
+
+    - name: Restart timedatectl(Ubuntu)   # timedatectl 서비스 재시작(Ubuntu)
+      ansible.builtin.systemd:
+        state: restarted
+        name: systemd-timesyncd
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Restart timedatectl(Rocky)    # timedatectl 서비스 재시작(Rocky)
+      ansible.builtin.systemd:
+        state: restarted
+        name: chronyd
+      when:
+        - ansible_facts['distribution'] == "Rocky"

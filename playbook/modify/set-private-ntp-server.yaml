@@ -1,0 +1,47 @@
+---
+- name: Configure Private NTP Server on All K8s Nodes
+  hosts: all
+  become: true
+  tasks:
+    - name: Comment out public NTP pools
+      replace:
+        path: /etc/chrony/chrony.conf
+        regexp: '^(pool .*)'
+        replace: '# \1'
+
+    - name: Remove existing private NTP server entry if any
+      lineinfile:
+        path: /etc/chrony/chrony.conf
+        regexp: '^server <NTP_SERVER_IP>.*'
+        state: absent
+
+    - name: Add private NTP server
+      lineinfile:
+        path: /etc/chrony/chrony.conf
+        line: "server <NTP_SERVER_IP> iburst prefer"
+        insertafter: EOF
+
+    - name: Restart chrony
+      systemd:
+        name: chrony
+        state: restarted
+
+    - name: Wait for chrony to sync
+      pause:
+        seconds: 5
+
+    - name: Verify NTP source
+      command: chronyc sources -v
+      register: ntp_sources
+
+    - name: Print NTP sources
+      debug:
+        msg: "{{ ntp_sources.stdout }}"
+
+    - name: Verify NTP tracking
+      command: chronyc tracking
+      register: ntp_tracking
+
+    - name: Print NTP tracking
+      debug:
+        msg: "{{ ntp_tracking.stdout }}"

@@ -1,0 +1,20 @@
+---
+- name: Set Hostname
+  hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Gather hostname fact
+      ansible.builtin.setup:
+        filter:
+          - hostname
+          - default_ipv4
+    - name: Show hostname
+      debug:
+        var: ansible_facts.hostname
+    - name: Show IPv4
+      debug:
+        var: ansible_facts.default_ipv4.address
+    # - name: Print all available facts
+    #   ansible.builtin.debug:
+    #     var: ansible_facts

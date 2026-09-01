@@ -1,0 +1,131 @@
+---
+- name: install kc_node_exporter
+  hosts: all
+  become: true 
+  gather_facts: true
+  vars:
+    myurl: "https://github.com/prometheus/node_exporter/releases/download/v1.6.0/node_exporter-1.6.0.linux-amd64.tar.gz"
+    # mycrc: "sha256:https://github.com/prometheus/node_exporter/releases/download/v1.6.0/node_exporter-1.6.0.linux-amd64.tar.gz.sha"
+    mydest: "/home/{{ ansible_facts['distribution'] | lower }}"
+  tasks:
+    - name: download file with proxy
+      ansible.builtin.get_url:
+        url: "{{ myurl }}"
+        dest: "{{ mydest }}"
+        # checksum: "{{ mycrc }}"
+        # mode: '0644'
+        # owner: 
+        # group: wheel
+      environment:
+        https_proxy: "http://proxy.internal.example.com:3128"
+
+    - name: Unarchive a file that is already on the remote machine
+      ansible.builtin.unarchive:
+        src: /home/ubuntu/node_exporter-1.6.0.linux-amd64.tar.gz
+        dest: /home/ubuntu
+        remote_src: yes
+
+    - name: determine available users
+      getent:
+        database: passwd
+
+    - name: set fact when node_exporter exists
+      set_fact:
+        user_exists: true
+      when: '"node_exporter" in item.key'
+      loop: "{{ ansible_facts.getent_passwd | dict2items }}"
+
+    - name: set fact when node_exporter does not exists
+      set_fact:
+        user_exists: false
+      when: '"node_exporter" not in item.key'
+      loop: "{{ ansible_facts.getent_passwd | dict2items }}"
+
+    - name: add user for node_exporter
+      ansible.builtin.user:
+        name: node_exporter
+        create_home: false
+        system: true
+        shell: /bin/false
+      when:
+        not user_exists
+
+    - name: check if kc_node_exporter directory exists
+      ansible.builtin.stat:
+        path: /usr/local/bin/node_exporter
+      register: kc_node_exporter_directory
+
+    - name: search deprecated node_exporter daemon
+      ansible.builtin.find:
+        paths: /etc/systemd/system/
+        patterns: "^node_exporter.*"
+        use_regex: true
+        file_type: file
+      register: unused_node_exporter_data
+    - name: remove unused node_exporter data
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      with_items: "{{ unused_node_exporter_data.files }}"
+
+    - name: copy node_exporter configs to /usr/local/bin
+      ansible.builtin.copy:
+        src: /home/ubuntu/node_exporter-1.6.0.linux-amd64/node_exporter
+        dest: /usr/local/bin
+        remote_src: true
+      when: not kc_node_exporter_directory.stat.exists
+
+    - name: change file ownership, group and permissions of node_exporter
+      ansible.builtin.file:
+        path: /usr/local/bin/node_exporter
+        owner: node_exporter
+        group: node_exporter
+        mode: 0755        
+
+    - name: check if kc_node_exporter daemon exists
+      ansible.builtin.stat:
+        path: /etc/systemd/system/node_exporter.service
+      register: kc_node_exporter_service
+      ignore_errors: true
+
+    - name: check bdate for /etc/systemd/system/node_exporter.service
+      ansible.builtin.shell: "date -r /etc/systemd/system/node_exporter.service +%s"
+      register: bmdate
+      changed_when: not kc_node_exporter_service.stat.exists
+      ignore_errors: true
+
+    - name: copy systemd service file to server
+      ansible.builtin.copy:
+        src: /etc/ansible/roles/node_exporter.service
+        dest: /etc/systemd/system
+        # remote_src: true
+      when: not kc_node_exporter_service.stat.exists
+
+    - name: check mdate for /etc/systemd/system/node_exporter.service
+      ansible.builtin.shell: "date -r /etc/systemd/system/node_exporter.service +%s"
+      register: amdate
+      changed_when: not kc_node_exporter_service.stat.exists
+      ignore_errors: true
+
+    - name: force systemd to reread configs
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: restart node_exporter
+      ansible.builtin.systemd:
+        state: restarted
+        name: node_exporter
+      when: bmdate.stdout not in amdate.stdout or bmdate is failed
+
+    - name: enable node_exporter
+      ansible.builtin.systemd:
+        name: node_exporter
+        enabled: true
+
+    - name: copy ansible.log
+      ansible.builtin.command: mv /etc/ansible/logs/daily.log /etc/ansible/logs/{{ lookup('pipe', 'date +%m_%d_%y') }}/{{ lookup('pipe', 'date +%m%d%y.%H:%M:%S') }}.log
+      connection: local
+      ignore_errors: true
+      when:
+        - inventory_hostname in groups.ops_log
+      

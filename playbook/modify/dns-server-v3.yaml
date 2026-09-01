@@ -1,0 +1,43 @@
+---
+- name: update resolved.conf
+  hosts: all
+  become: true
+  tasks:
+    - name: install systemd-resolved(rocky)
+      ansible.builtin.dnf:
+        name: systemd-resolved
+        state: latest
+      ignore_errors: true
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+    - name: enable systemd-resolved (rocky)
+      ansible.builtin.systemd_service:
+        name: systemd-resolved
+        enabled: true
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+        
+    - name: remove old dns configuration
+      ansible.builtin.file:
+        path: "/etc/systemd/resolved.conf"
+        state: absent
+      ignore_errors: true
+
+    - name: configure dns service
+      ansible.builtin.copy:
+        src: /etc/ansible/roles/systemd-resolved.conf
+        dest: /etc/systemd/resolved.conf
+
+    - name: append symbolic link for stub(rocky)
+      ansible.builtin.shell: sudo ln -sf  /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: force systemd to reread configs
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: restart systemd-resolved
+      ansible.builtin.systemd:
+        state: restarted
+        name: systemd-resolved

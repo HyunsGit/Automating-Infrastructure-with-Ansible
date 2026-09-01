@@ -1,0 +1,14 @@
+- name: Check time sync status on all nodes
+  hosts: all
+  become: true
+  tasks:
+    - name: Get current time and NTP sync status
+      shell: |
+        echo "=== {{ inventory_hostname }} ==="
+        date
+        chronyc tracking | grep -E 'Reference ID|System time|Leap status'
+      register: time_status
+
+    - name: Print time sync status
+      debug:
+        msg: "{{ time_status.stdout }}"

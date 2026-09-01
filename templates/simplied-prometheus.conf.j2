@@ -1,0 +1,459 @@
+global:
+{% filter indent(width=2, first=true) %}
+scrape_interval: 30s
+evaluation_interval: 15s
+{% endfilter %}
+alerting:
+{% filter indent(width=2, first=true) %}
+alertmanagers:
+{% filter indent(width=2, first=true) %}
+- static_configs:
+{% filter indent(width=2, first=true) %}
+- targets:
+{% filter indent(width=2, first=true) %}
+- infra-prometheus-01:9093
+{% endfilter %}
+{% endfilter %}
+{% endfilter %}
+{% endfilter %}
+
+rule_files:
+{% filter indent(width=2, first=true) %}
+- /etc/prometheus/instance_state_rules.yml
+- /etc/prometheus/service_state_rules.yml
+{% endfilter %}
+
+scrape_configs:
+{% filter indent(width=2, first=true) %}
+- job_name: 'fortigate_snmp'
+{% endfilter %}
+{% filter indent(width=4, first=true) %}
+metrics_path: /snmp
+scrape_timeout: 30s
+static_configs:
+{% endfilter %}
+{% filter indent(width=6, first=true) %}
+- targets:
+{% endfilter %}
+{% filter indent(width=8, first=true) %}
+- '10.100.4.157'
+- '10.100.28.48'
+- '10.99.200.1'
+- '10.160.4.21'
+{% endfilter %}
+{% filter indent(width=4, first=true) %}
+params:
+{% endfilter %}
+{% filter indent(width=6, first=true) %}
+module: [fortinet_fortigate]
+{% endfilter %}
+{% filter indent(width=4, first=true) %}
+relabel_configs:
+{% endfilter %}
+{% filter indent(width=6, first=true) %}
+- source_labels: [__address__]
+{% endfilter %}
+{% filter indent(width=8, first=true) %}
+target_label: __param_target
+{% endfilter %}
+{% filter indent(width=6, first=true) %}
+- source_labels: [__param_target]
+{% endfilter %}
+{% filter indent(width=8, first=true) %}
+target_label: instance
+{% endfilter %}
+{% filter indent(width=6, first=true) %}
+- target_label: __address__
+{% endfilter %}
+{% filter indent(width=8, first=true) %}
+replacement: 'infra-prometheus-01:9116'
+{% endfilter %}
+{% filter indent(width=2, first=true) %}
+- job_name: 'public'
+{% endfilter %}
+{% filter indent(width=4, first=true) %}
+scrape_interval: 5s
+static_configs:
+{% endfilter %}
+{% filter indent(width=6, first=true) %}
+- targets: ['61.109.239.146:39100']
+{% filter indent(width=2, first=true) %}
+labels:
+{% filter indent(width=2, first=true) %}
+domain: 'example'
+project: 'connect-message'
+phase: 'cbt'
+hostname: 'kicm-csp-cbt-fia-forward-01'
+ipv4: '10.203.80.21'
+service: 'kicm-fia (금융존-한투)'
+{% endfilter %}
+{% endfilter %}
+{% endfilter %}
+{% filter indent(width=6, first=true) %}
+- targets: ['210.109.53.189:39100']
+{% filter indent(width=2, first=true) %}
+labels:
+{% filter indent(width=2, first=true) %}
+domain: 'example'
+project: 'connect-message'
+phase: 'prod'
+hostname: 'kicm-csp-prod-fia-forward-01'
+ipv4: '10.203.64.58'
+service: 'kicm-fia (금융존-한투)'
+{% endfilter %}
+{% endfilter %}
+{% endfilter %}
+{% filter indent(width=6, first=true) %}
+- targets: ['61.109.236.62:39100']
+{% filter indent(width=2, first=true) %}
+labels:
+{% filter indent(width=2, first=true) %}
+domain: 'example'
+project: 'connect-message'
+phase: 'cbt'
+hostname: 'kicm-csp-cbt-fia-nat-01'
+ipv4: '10.203.80.249'
+service: 'kicm-fia (금융존-한투)'
+{% endfilter %}
+{% endfilter %}
+{% endfilter %}
+{% filter indent(width=6, first=true) %}
+- targets: ['210.109.52.186:39100']
+{% filter indent(width=2, first=true) %}
+labels:
+{% filter indent(width=2, first=true) %}
+domain: 'example'
+project: 'connect-message'
+phase: 'prod'
+hostname: 'kicm-csp-prod-fia-nat-01'
+ipv4: '10.203.64.217'
+service: 'kicm-fia (금융존-한투)'
+{% endfilter %}
+{% endfilter %}
+{% endfilter %}
+{% filter indent(width=6, first=true) %}
+- targets: ['kw-prod-cdr-01:39100']
+{% filter indent(width=2, first=true) %}
+labels:
+{% filter indent(width=2, first=true) %}
+project: 'kw'
+phase: 'prod'
+hostname: 'kw-prod-cdr-01'
+ipv4: '10.111.0.98'
+service: 'kw-cmn (카카오워크)'
+{% endfilter %}
+{% endfilter %}
+{% endfilter %}
+{% filter indent(width=6, first=true) %}
+- targets: ['kw-prod-cdr-02:39100']
+{% filter indent(width=2, first=true) %}
+labels:
+{% filter indent(width=2, first=true) %}
+project: 'kw'
+phase: 'prod'
+hostname: 'kw-prod-cdr-02'
+ipv4: '10.111.0.17'
+service: 'kw-cmn (카카오워크)'
+{% endfilter %}
+{% endfilter %}
+{% endfilter %}
+
+
+{% filter indent(width=6, first=true) %}
+{% for host in groups['kr2-vm'] %}
+- targets: ['{{ host }}:39100']
+{% filter indent(width=2, first=true) %}
+labels:
+{% filter indent(width=2, first=true) %}
+{% if "dbe" in host and "kw" not in host %}
+domain: 'example'
+project: 'infra-zone'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'db'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "infra" in host and "kicc" not in host %}
+domain: 'example'
+project: 'infra-zone'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'infra'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif ("ist" in host or "sec" in host) and "kw" not in host %}
+domain: 'example'
+project: 'infra-zone'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'ist'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "proxy" in host %}
+domain: 'example'
+project: 'infra-zone'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'infra'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "kica" in host and "hana" in host %}{# start of kica \ #}
+domain: 'example'
+project: 'connect-always'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'kica-hanatalk (하나톡)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "kica" in host and "api" in host %}
+domain: 'example'
+project: 'connect-always'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'kica-apigw (상담톡-api게이트웨이)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "kica" in host and "always" in host %}
+domain: 'example'
+project: 'connect-always'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'kica-alwaystalk (상담톡)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "kica" in host %}{# end of kica / #}
+domain: 'example'
+project: 'connect-always'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'kica-alwaystalk (상담톡)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "kicc" in host and "call" in host %}{# start of kicc \ #}
+domain: 'example'
+project: 'connect-center'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'kicc-callinfra (콜-인프라)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "callinfra" in host %}
+domain: 'example'
+project: 'connect-center'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'kicc-callinfra (콜-인프라)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "kicc" in host and "nexus" in host %}
+domain: 'example'
+project: 'connect-center'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'kicc-nexus (넥서스-인프라)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "kicc" in host and "scenariobld" in host %}{# end of kicc / #}
+domain: 'example'
+project: 'connect-center'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'kicc-scenariobld (시나리오-빌더)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "kicm" in host and "csp-cbt" in host %}{# start of kicm / #}
+domain: 'example'
+project: 'connect-message'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'kicm-fia (금융존-한투)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "kicm" in host and "csp-prod-bnk" in host %}
+domain: 'example'
+project: 'connect-message'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'kicm-kakaobank (금융존-카뱅)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "kicm" in host and "fin-prod-bnk" in host %}
+domain: 'example'
+project: 'connect-message'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'kicm-kakaobank (금융존-카뱅)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "kicm" in host and "fin-prod-clst" in host %}
+domain: 'example'
+project: 'connect-message'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'kicm-fia (금융존-한투)/kakaobank (금융존-카뱅)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "kicm" in host and "csp-cbt-fia" in host %}
+domain: 'example'
+project: 'connect-message'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'kicm-fia (금융-고객사)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "kicm" in host and "csp-prod-fia" in host %}
+domain: 'example'
+project: 'connect-message'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'kicm-fia (금융존-한투)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "kicm" in host and "fin-cbt" in host %}
+domain: 'example'
+project: 'connect-message'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'kicm-fia (금융존-한투)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "kicm" in host and "fin-prod-fia" in host %}
+domain: 'example'
+project: 'connect-message'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'kicm-fia (금융존-한투)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "kicm" in host and "prod-cmn" in host %}
+domain: 'example'
+project: 'connect-message'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'kicm-cmn (금융-고객사)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "kicm" in host and "prod-common" in host %}{# end of kicm / #}
+domain: 'example'
+project: 'connect-message'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'kicm-cmn (금융-고객사)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "kict" in host and "katia" in host %}{# start of kict / #}
+domain: 'example'
+project: 'connect-talk'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'kict-katia (한국자동차튜닝산업협회)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "kict" in host and "cms" in host %}
+domain: 'example'
+project: 'connect-talk'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'kict-cms (컨텐츠-관리-시스템)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "kict" in host and "nh" in host %}
+domain: 'example'
+project: 'connect-talk'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'kict-nh (농협)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "kict" in host and "wavelens" in host %}
+domain: 'example'
+project: 'connect-talk'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'kict-wavelens (웨이브렌즈)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "kict" in host and "vsc" in host %}
+domain: 'example'
+project: 'connect-talk'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'kict-vsc (대화형-플랫폼-컨트롤러)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "kict" in host and "xgateway" in host %}
+domain: 'example'
+project: 'connect-talk'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'kict-xgateway (vsc-api-게이트웨이)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "kict-fin-cbt" in host or "kict-fin-prod" in host %}
+domain: 'example'
+project: 'connect-talk'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'kict-vsc (대화형-플랫폼-컨트롤러)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "kict" in host and "cbnow" in host %}
+domain: 'example'
+project: 'connect-talk'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'kict-cbnow (챗봇나우)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "kict-dev" in host or "kict-prod" in host %}{# end of kict / #}
+domain: 'example'
+project: 'connect-talk'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'kict-cms (컨텐츠-관리-시스템)/wavelens (웨이브렌즈)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "kw" in host and "msg" in host %}{# start of kw \ #}
+domain: 'example'
+project: 'kw'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'kw-msg (카카오워크-메시지)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "kw" in host and "msg" not in host and "sk" not in host %}{# end of kw / #}
+domain: 'example'
+project: 'kw'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'kw-cmn (카카오워크)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "kw" in host and "-sk-" in host %}{# end of kwsk / #}
+domain: 'example'
+project: 'kwsk'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'kwsk-msg (카카오워크sk)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "gw" in host and "kfam" in host %}{# end of groupware-kfam / #}
+domain: 'example'
+project: 'groupware-kfam'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'gw-kfam (공동체 그룹웨어)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "gw" in host and "saas" in host %}{# end of groupware-saas / #}
+domain: 'example'
+project: 'groupware-saas'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'gw-saas (saas형 그룹웨어)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "gw" in host and "dkt" in host %}{# end of groupware-dkt / #}
+domain: 'example'
+project: 'groupware-dkt'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'gw-dkt (사내 그룹웨어)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "gw" in host and "kw" in host %}{# end of groupware-demo / #}
+domain: 'example'
+project: 'groupware-demo'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'gw-demo (데모 그룹웨어)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "centerflow" in host or "cf-" in host %}{# end of centerflow / #}
+domain: 'example'
+project: 'cf'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'cf-cmn (센터플로우)'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% elif "-dkt-" in host or "vpc-db" in host %}
+domain: 'example'
+project: 'infra-zone'
+phase: '{% if "sbox" in host %}sbox{% elif "cbt" in host %}cbt{% else %}prod{% endif %}'
+service: 'dkt'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% else %}
+domain: 'example'
+project: 'unsorted'
+phase: 'unsorted'
+service: 'unsorted'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+{% endif %}
+{% endfilter %}
+{% endfilter %}
+{% endfor %}
+{% endfilter %}

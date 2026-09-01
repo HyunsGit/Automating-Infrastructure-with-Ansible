@@ -1,0 +1,31 @@
+---
+- name: check ansible connectivity
+  hosts: all
+  become: true
+
+  vars:
+    users_to_verify:
+      - sysadm
+      - security
+      - deploy
+      - frodo
+      - neo
+
+  tasks:
+    - name: check user existence
+      getent:
+        database: passwd
+        key: "{{ item }}"
+      loop: "{{ users_to_verify }}"
+      check_mode: true
+      ignore_errors: true
+      # when:
+      #   - ansible_facts['distribution'] == "Rocky"
+      #   - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: copy ansible.log
+      ansible.builtin.command: mv /etc/ansible/logs/daily.log /etc/ansible/logs/{{ lookup('pipe', 'date +%m_%d_%y') }}/{{ lookup('pipe', 'date +%m%d%y.%H:%M:%S') }}.log
+      connection: local
+      ignore_errors: true
+      when:
+        - inventory_hostname in groups.ops_log

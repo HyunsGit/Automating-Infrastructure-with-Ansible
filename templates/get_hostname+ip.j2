@@ -1,0 +1,425 @@
+{#}
+{% for host in groups['all'] %}
+--------------------------------
+HOST: {{ hostvars[host]['ansible_facts']['hostname'] }}, OS: {{ hostvars[host]['ansible_facts']['distribution'] }}, Version: {{ hostvars[host]['ansible_facts']['distribution_major_version'] }}
+--------------------------------
+{% endfor %}
+{#}
+
+
+
+
+global:
+{% filter indent(width=2, first=true) %}
+scrape_interval: 30s
+evaluation_interval: 15s
+{% endfilter %}
+rule_files:
+scrape_configs:
+{% filter indent(width=2, first=true) %}
+- job_name: 'public'
+{% endfilter %}
+{% filter indent(width=4, first=true) %}
+scrape_interval: 5s
+static_configs:
+{% endfilter %}
+{% filter indent(width=6, first=true) %}
+{% for host in groups['prometheus_master'] %}
+- targets: ['{{ host }}:9090']
+{% filter indent(width=2, first=true) %}
+labels:
+{% filter indent(width=2, first=true) %}
+domain: 'example'
+project: 'infra-zone'
+vpc: 'vpc-internal'
+subnet: 'sub-internal-pri-a'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+service: 'prometheus'
+type: 'prometheus-master'
+{% endfilter %}
+{% endfilter %}
+{% endfor %}
+{% endfilter %}
+
+
+{% filter indent(width=6, first=true) %}
+{% for host in groups['ext'] %}
+- targets: ['{{ host }}:39100']
+{% filter indent(width=2, first=true) %}
+labels:
+{% filter indent(width=2, first=true) %}
+{% if "lb" in host %}
+domain: 'example'
+project: 'infra-zone'
+vpc: 'vpc-external'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+service: 'node-exporter'
+type: 'lb-server'
+{% elif "nat" in host %}
+domain: 'example'
+project: 'infra-zone'
+vpc: 'vpc-external'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+service: 'node-exporter'
+type: 'nat-server'
+{% else %}
+domain: 'example'
+project: 'unsorted'
+vpc: 'unsorted'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+service: 'node-exporter'
+type: 'etc'
+{% endif %}
+{% endfilter %}
+{% endfilter %}
+{% endfor %}
+{% endfilter %}
+
+{% filter indent(width=6, first=true) %}
+{% for host in groups['ext_proxy'] %}
+- targets: ['{{ host }}:39100']
+{% filter indent(width=2, first=true) %}
+labels:
+{% filter indent(width=2, first=true) %}
+{% if "proxy" in host %}
+domain: 'example'
+project: 'infra-zone'
+vpc: 'vpc-external'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+service: 'node-exporter'
+type: 'proxy-server'
+{% else %}
+domain: 'example'
+project: 'unsorted'
+vpc: 'unsorted'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+service: 'node-exporter'
+type: 'etc'
+{% endif %}
+{% endfilter %}
+{% endfilter %}
+{% endfor %}
+{% endfilter %}
+
+
+{% filter indent(width=6, first=true) %}
+{% for host in groups['infra'] %}
+- targets: ['{{ host }}:39100']
+{% filter indent(width=2, first=true) %}
+labels:
+{% filter indent(width=2, first=true) %}
+{% if "infra" in host %}
+domain: 'example'
+project: 'infra-zone'
+vpc: 'vpc-internal'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+service: 'node-exporter'
+type: 'internal-server'
+{% else %}
+domain: 'example'
+project: 'unsorted'
+vpc: 'unsorted'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+service: 'node-exporter'
+type: 'etc-server'
+{% endif %}
+{% endfilter %}
+{% endfilter %}
+{% endfor %}
+{% endfilter %}
+
+
+{% filter indent(width=6, first=true) %}
+{% for host in groups['dbe_dev'] %}
+- targets: ['{{ host }}:39100']
+{% filter indent(width=2, first=true) %}
+labels:
+{% filter indent(width=2, first=true) %}
+{% if "dbe" in host %}
+domain: 'example'
+project: 'db-zone'
+vpc: 'vpc-db-dev'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+service: 'node-exporter'
+type: 'dbe-dev-vm'
+{% else %}
+domain: 'example'
+project: 'db-zone'
+vpc: 'vpc-db-prod'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+service: 'node-exporter'
+type: 'dbe-prod-vm'
+{% endif %}
+{% endfilter %}
+{% endfilter %}
+{% endfor %}
+{% endfilter %}
+
+
+{% filter indent(width=6, first=true) %}
+{% for host in groups['dbe_prod'] %}
+- targets: ['{{ host }}:39100']
+{% filter indent(width=2, first=true) %}
+labels:
+{% filter indent(width=2, first=true) %}
+{% if "dbe" in host %}
+domain: 'example'
+project: 'db-zone'
+vpc: 'vpc-db-prod'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+service: 'node-exporter'
+type: 'dbe-prod-vm'
+{% else %}
+domain: 'example'
+project: 'db-zone'
+vpc: 'vpc-db-dev'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+service: 'node-exporter'
+type: 'dbe-dev-vm'
+{% endif %}
+{% endfilter %}
+{% endfilter %}
+{% endfor %}
+{% endfilter %}
+
+
+{% filter indent(width=6, first=true) %}
+{% for host in groups['kicc_prod'] %}
+- targets: ['{{ host }}:39100']
+{% filter indent(width=2, first=true) %}
+labels:
+{% filter indent(width=2, first=true) %}
+{% if "kicc-prod-nexus" in host %}
+domain: 'example'
+project: 'connect-center'
+vpc: 'vpc-security-prod'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+service: 'node-exporter'
+type: 'kicc-prod-nexus-vm'
+{% else %}
+domain: 'example'
+project: 'connect-center'
+vpc: 'vpc-security-dev'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+service: 'node-exporter'
+type: 'kicc-dev-nexus-vm'
+{% endif %}
+{% endfilter %}
+{% endfilter %}
+{% endfor %}
+{% endfilter %}
+
+{% filter indent(width=6, first=true) %}
+{% for host in groups['kicm_prod'] %}
+- targets: ['{{ host }}:39100']
+{% filter indent(width=2, first=true) %}
+labels:
+{% filter indent(width=2, first=true) %}
+{% if "kicm-prod-cmn" in host %}
+domain: 'example'
+project: 'connect-message'
+vpc: 'vpc-kicm-prod'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+service: 'node-exporter'
+type: 'kicm-prod-cmn-vm'
+{% else %}
+domain: 'example'
+project: 'connect-message'
+vpc: 'vpc-kicm-dev'
+ipv4: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+service: 'node-exporter'
+type: 'kicm-dev-cmn-vm'
+{% endif %}
+{% endfilter %}
+{% endfilter %}
+{% endfor %}
+{% endfilter %}
+
+
+{% filter indent(width=6, first=true) %}
+{% for host in groups['kicm_csp_prod'] %}
+- targets: ['{{ host }}:39100']
+{% filter indent(width=2, first=true) %}
+labels:
+{% filter indent(width=2, first=true) %}
+{% if "kicm-csp-prod" in host %}
+domain: 'example'
+project: 'connect-message'
+vpc: 'vpc-csp-prod-kicm'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+service: 'node-exporter'
+type: 'kicm-csp-prod-vm'
+{% else %}
+domain: 'example'
+project: 'connect-message'
+vpc: 'vpc-csp-cbt-kicm'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+service: 'node-exporter'
+type: 'kicm-csp-dev-vm'
+{% endif %}
+{% endfilter %}
+{% endfilter %}
+{% endfor %}
+{% endfilter %}
+
+
+{% filter indent(width=6, first=true) %}
+{% for host in groups['kicm_csp_cbt'] %}
+- targets: ['{{ host }}:39100']
+{% filter indent(width=2, first=true) %}
+labels:
+{% filter indent(width=2, first=true) %}
+{% if "kicm-csp-cbt" in host %}
+domain: 'example'
+project: 'connect-message'
+vpc: 'vpc-csp-cbt-kicm'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+service: 'node-exporter'
+type: 'kicm-csp-cbt-vm'
+{% else %}
+domain: 'example'
+project: 'connect-message'
+vpc: 'vpc-csp-prod-kicm'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+service: 'node-exporter'
+type: 'kicm-csp-prod-vm'
+{% endif %}
+{% endfilter %}
+{% endfilter %}
+{% endfor %}
+{% endfilter %}
+
+
+{% filter indent(width=6, first=true) %}
+{% for host in groups['kict_dev'] %}
+- targets: ['{{ host }}:39100']
+{% filter indent(width=2, first=true) %}
+labels:
+{% filter indent(width=2, first=true) %}
+{% if "kict-dev" in host %}
+domain: 'example'
+project: 'connect-talk'
+vpc: 'vpc-kict-dev'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+service: 'node-exporter'
+type: 'kict-dev-vm'
+{% else %}
+domain: 'example'
+project: 'connect-talk'
+vpc: 'vpc-kict-prod'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+service: 'node-exporter'
+type: 'kict-prod-vm'
+{% endif %}
+{% endfilter %}
+{% endfilter %}
+{% endfor %}
+{% endfilter %}
+
+
+{% filter indent(width=6, first=true) %}
+{% for host in groups['kict_prod'] %}
+- targets: ['{{ host }}:39100']
+{% filter indent(width=2, first=true) %}
+labels:
+{% filter indent(width=2, first=true) %}
+{% if "kict-prod" in host %}
+domain: 'example'
+project: 'connect-talk'
+vpc: 'vpc-kict-prod'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+service: 'node-exporter'
+type: 'kict-prod-vm'
+{% else %}
+domain: 'example'
+project: 'connect-talk'
+vpc: 'vpc-kict-dev'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+service: 'node-exporter'
+type: 'kict-dev-vm'
+{% endif %}
+{% endfilter %}
+{% endfilter %}
+{% endfor %}
+{% endfilter %}
+
+{% filter indent(width=6, first=true) %}
+{% for host in groups['kica_dev'] %}
+- targets: ['{{ host }}:39100']
+{% filter indent(width=2, first=true) %}
+labels:
+{% filter indent(width=2, first=true) %}
+{% if "kica-dev" in host %}
+domain: 'example'
+project: 'connect-always'
+vpc: 'vpc-kica-dev'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+service: 'node-exporter'
+type: 'kica-dev-vm'
+{% else %}
+domain: 'example'
+project: 'connect-always'
+vpc: 'vpc-kica-prod'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+service: 'node-exporter'
+type: 'kica-prod-vm'
+{% endif %}
+{% endfilter %}
+{% endfilter %}
+{% endfor %}
+{% endfilter %}
+
+
+{% filter indent(width=6, first=true) %}
+{% for host in groups['ws_prod'] %}
+- targets: ['{{ host }}:39100']
+{% filter indent(width=2, first=true) %}
+labels:
+{% filter indent(width=2, first=true) %}
+{% if "ws-prod" in host %}
+domain: 'example'
+project: 'work-solution'
+vpc: 'vpc-ws-prod'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+service: 'node-exporter'
+type: 'ws-prod-gwdemo-vm'
+{% else %}
+domain: 'example'
+project: 'work-solution'
+vpc: 'vpc-ws-dev'
+hostname: '{{ hostvars[host]['ansible_facts']['hostname'] }}'
+ipv4: '{{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}'
+service: 'node-exporter'
+type: 'ws-dev-gwdemo-vm'
+{% endif %}
+{% endfilter %}
+{% endfilter %}
+{% endfor %}
+{% endfilter %}

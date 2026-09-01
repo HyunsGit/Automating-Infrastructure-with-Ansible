@@ -1,0 +1,40 @@
+- name: Search syslog for GitHub IPs between 14:25 and 14:48 on Mar 19
+  hosts: all
+  become: true
+  gather_facts: false
+
+  vars:
+    target_ips: '185\.199\.110\.154|185\.199\.111\.154'
+    log_date: "Mar 19"
+    time_start: "14:25:00"
+    time_end: "14:48:00"
+
+  tasks:
+    - name: Search syslog for GitHub IPs in time window
+      shell: |
+        grep -E "{{ target_ips }}" /var/log/syslog | awk '{
+          match($0, /[0-9]{2}:[0-9]{2}:[0-9]{2}/, t);
+          if (t[0] >= "{{ time_start }}" && t[0] <= "{{ time_end }}") print
+        }' | grep "{{ log_date }}"
+      register: syslog_result
+      changed_when: false
+      failed_when: syslog_result.rc > 1
+
+    - name: Print matched lines
+      debug:
+        msg: "{{ syslog_result.stdout_lines }}"
+
+    - name: Show per-host summary
+      debug:
+        msg: "{{ inventory_hostname }} — {{ syslog_result.stdout_lines | length }} match(es) found between {{ time_start }} and {{ time_end }}"
+
+    - name: Save results to file
+      copy:
+        content: |
+          Host: {{ inventory_hostname }}
+          Window: {{ log_date }} {{ time_start }} ~ {{ time_end }}
+          Matches: {{ syslog_result.stdout_lines | length }}
+          ---
+          {{ syslog_result.stdout }}
+        dest: "/tmp/github_ip_{{ inventory_hostname }}.txt"
+      when: syslog_result.stdout_lines | length > 0

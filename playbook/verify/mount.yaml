@@ -1,0 +1,23 @@
+---
+- name: check mount status
+  hosts: all
+  become: true
+  vars:
+    verify_nfsmounts:
+      - path: "10.203.84.121:/kicm-csp-cbt-fia-nfs-01 /data1"   #환경에 맞는 마운트포인트로 변경 필수!!
+  tasks: 
+    - name: verify if filesystem is mounted
+      shell: cat /etc/fstab
+      register: mnt
+      changed_when: 'item.path | string not in mnt.stdout'
+      ignore_errors: true
+      with_items: "{{ verify_nfsmounts }}"
+      when:
+        - inventory_hostname not in groups.ops_log
+    
+    - name: copy ansible.log
+      ansible.builtin.command: mv /etc/ansible/logs/daily.log /etc/ansible/logs/{{ lookup('pipe', 'date +%m_%d_%y') }}/{{ lookup('pipe', 'date +%m%d%y.%H:%M:%S') }}.log
+      connection: local
+      ignore_errors: true
+      when:
+        - inventory_hostname in groups.ops_log

@@ -1,0 +1,42 @@
+---
+- name: Configure LVM storage
+  hosts: all
+  become: yes
+  tasks:
+    - name: Create volume group with physical volumes
+      community.general.lvg:
+        vg: db-data
+        pvs: /dev/nvme1n1,/dev/nvme2n1
+        state: present
+
+    - name: Create logical volume using 100% of VG space
+      community.general.lvol:
+        vg: db-data
+        lv: data
+        size: 100%FREE
+        state: present
+
+    - name: Create filesystem on logical volume
+      filesystem:
+        fstype: xfs
+        dev: /dev/db-data/data
+
+    - name: Create mount point directory
+      file:
+        path: /data
+        state: directory
+        mode: '0755'
+
+    - name: Mount logical volume
+      mount:
+        path: /data
+        src: /dev/db-data/data
+        fstype: xfs
+        state: mounted
+        opts: defaults
+
+    - name: copy ansible.log
+      ansible.builtin.command: mv /etc/ansible/logs/daily.log /etc/ansible/logs/{{ lookup('pipe', 'date +%m_%d_%y') }}/{{ lookup('pipe', 'date +%m%d%y.%H:%M:%S') }}.log
+      delegate_to: localhost
+      run_once: true
+      ignore_errors: true

@@ -1,0 +1,89 @@
+---
+- name: Modify Ulimit
+  hosts: all
+  become: true
+  tasks:
+    - name: Add or modify nofile limit for the users
+      pam_limits:
+        domain: root
+        limit_type: "{{ item }}"
+        limit_item: nofile
+        value: 655350
+        use_max: yes
+      with_items:
+        - soft
+        - hard
+
+    - name: Add or modify nofile limit for the users
+      pam_limits:
+        domain: '*'
+        limit_type: "{{ item }}"
+        limit_item: nofile
+        value: 655350
+        use_max: yes
+      with_items:
+        - soft
+        - hard
+
+    - name: Add or modify nproc limit for the users
+      pam_limits:
+        domain: root
+        limit_type: "{{ item }}"
+        limit_item: nproc
+        value: 65535
+        use_max: yes
+      with_items:
+        - soft
+        - hard
+
+    - name: Add or modify nproc limit for the users
+      pam_limits:
+        domain: '*'
+        limit_type: "{{ item }}"
+        limit_item: nproc
+        value: 655350
+        use_max: yes
+      with_items:
+        - soft
+        - hard
+
+    - name: Read the file contents
+      slurp:
+        src: /etc/security/limits.conf
+      register: ulimit
+  
+    # - name: Read the file contents
+    #   slurp:
+    #     src: /home/ubuntu/test.yaml
+    #   register: test
+      # with_items:
+      #   - /etc/security/limits.conf
+      #   - /home/ubuntu//test.yaml
+
+    # - name: Filter out comment lines (lines starting with '#')
+    #   set_fact:
+    #     non_comment_lines: "{{ ulimit.content | b64decode | split('\n') | select('match', '^(?!#).*') | select('match', '\\S') | list }}"
+
+    # - name: Fail if the file is empty after removing comments
+    #   debug:
+    #     msg: "The file is empty after removing comments."
+    #   when: non_comment_lines | length == 0
+
+    # - name: Check if the file is not empty after removing comments
+    #   debug:
+    #     msg: "The file is not empty after removing comments."
+    #   changed_when: non_comment_lines | length > 0
+
+    # - name: Filter out comment lines (lines starting with '#')
+    #   set_fact:
+    #     test_comment_lines: "{{ test.content | b64decode | split('\n') | select('match', '^(?!#).*') | select('match', '\\S') | list }}"
+
+    # - name: Fail if the file is empty after removing comments
+    #   debug:
+    #     msg: "The file is empty after removing comments."
+    #   when: test_comment_lines | length == 0
+
+    # - name: Check if the file is not empty after removing comments
+    #   debug:
+    #     msg: "The file is not empty after removing comments."
+    #   changed_when: test_comment_lines | length > 0

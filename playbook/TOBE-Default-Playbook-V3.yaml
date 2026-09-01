@@ -1,0 +1,409 @@
+# 필수 Ansible Playbook 실행
+# - Route53 A레코드 등록
+# - Host명 변경
+# - Puppet 에이전트 설치 및 구성
+# - Timezone 동기화(KST)
+
+---
+- name: Create Route53 Record   # Route53 A레코드 등록
+  hosts: localhost
+  gather_facts: true
+  vars:
+    aws_access_key: "{{ vault_aws_access_key }}"
+    aws_secret_key: "{{ vault_aws_secret_key }}"
+    aws_region: "ap-northeast-2"
+    route53_zone: "example.com"
+  tasks:
+    - name: Create or update Route53 records from inventory
+      amazon.aws.route53:
+        state: present
+        zone: "{{ route53_zone }}"
+        record: "{{ item }}.{{ route53_zone }}."
+        type: A
+        ttl: 600
+        value: "{{ hostvars[item]['ansible_host'] | default(hostvars[item]['private_ip'] | default('')) }}"
+        overwrite: true
+      loop: "{{ groups['all'] }}"
+      delegate_to: localhost
+      when: hostvars[item]['ansible_host'] is defined or hostvars[item]['private_ip'] is defined
+      environment:
+        AWS_ACCESS_KEY_ID: "{{ aws_access_key }}"
+        AWS_SECRET_ACCESS_KEY: "{{ aws_secret_key }}"
+        AWS_REGION: "{{ aws_region }}"
+
+
+- name: install kc_monitor_agent
+  hosts: all
+  gather_facts: true
+  become: true
+  vars_prompt:
+    - name: access_id
+      prompt: "Enter access_id: "
+      private: false
+    - name: secret_key
+      prompt: "Enter secret_key: "
+      unsafe: true
+  tasks:
+    - name: Download file from objectstorage.kr-central-2.your-cloud.example.com without SSL validation
+      ansible.builtin.get_url:
+        url: "https://objectstorage.kr-central-2.your-cloud.example.com/v1/<PROJECT_ID>/kic-monitoring-agent/package/kic_monitor_agent_1.0.0_amd64.deb"
+        dest: /home/{{ ansible_distribution | lower }}
+        validate_certs: no
+        mode: '0644'
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: download kc_monitor_agent package(rocky)
+      ansible.builtin.get_url:
+       url: https://objectstorage.kr-central-2.your-cloud.example.com/v1/<PROJECT_ID>/kic-monitoring-agent/package/kic_monitor_agent-1.0.0.x86_64.rpm
+       dest: /home/{{ ansible_distribution | lower }}
+       mode: '0644'
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: install kc_monitor_agent via dpkg(ubuntu)
+      ansible.builtin.apt:
+       deb: /home/{{ ansible_distribution | lower }}/kic_monitor_agent_1.0.0_amd64.deb
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: install kc_monitor_agent via rpm(rocky)
+      ansible.builtin.shell: "yum localinstall /home/rocky/kic_monitor_agent-1.0.0.x86_64.rpm -y"
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: check if kic_monitor_agent.log file exists
+      ansible.builtin.stat:
+        path: /var/log/kic_monitor_agent.log
+      register: kic_monitor_agent_log
+
+    - name: create kic_monitor_agent.log file
+      file:
+        path: "/var/log/kic_monitor_agent.log"
+        state: touch
+      when:
+        not kic_monitor_agent_log.stat.exists
+
+    - name: change file ownership, group and permissions of /var/log/kic_monitor_agent.log
+      ansible.builtin.file:
+        path: /var/log/kic_monitor_agent.log
+        owner: kic_monitor_agent
+        group: kic_monitor_agent
+        mode: '0666'
+      ignore_errors: true
+
+    - name: check if kic_monitor_agent config exists
+      ansible.builtin.stat:
+        path: /etc/default/kic_monitor_agent
+      register: kic_monitor_agent
+
+    - name: search for string
+      ansible.builtin.find:
+        name: "/etc/default"
+        patterns: "kic_monitor_agent"
+        file_type: file
+        use_regex: false
+        read_whole_file: true
+        contains: "ANSIBLE"
+      register: find_result
+      failed_when: find_result.matched == 0
+      ignore_errors: true
+
+    - name: remove old kc_monitor_agent config
+      ansible.builtin.file:
+        path: /etc/default/kic_monitor_agent
+        state: absent
+      when: find_result is failed
+
+    - name: create kc_monitor_agent config
+      ansible.builtin.file:
+        path: "/etc/default/kic_monitor_agent"
+        state: touch
+      when: find_result is failed
+
+    - name: append mandatory kc_monitor_agent config
+      ansible.builtin.blockinfile:
+            path: /etc/default/kic_monitor_agent
+            marker: "#{mark} MANAGED BY ANSIBLE"
+            block: |
+                KIC_LOG_FILE_PATH=/var/log/kic_monitor_agent.log
+                KIC_MONITOR_ENDPOINT_URL=https://monitoring.kr-central-2.your-cloud.example.com
+                KIC_MONITOR_AGENT_AUTH_APPLICATION_CREDENTIAL_ID={{ access_id }}
+                KIC_MONITOR_AGENT_AUTH_APPLICATION_CREDENTIAL_SECRET={{ secret_key }}
+      when: find_result is failed
+
+    - name: Delete ansible block
+      ansible.builtin.lineinfile:
+        path: /etc/default/kic_monitor_agent
+        state: absent
+        regexp: 'ANSIBLE'
+      ignore_errors: true
+
+    - name: change file ownership, group and permissions of /etc/default/kic_monitor_agent
+      ansible.builtin.file:
+        path: /etc/default/kic_monitor_agent
+        owner: kic_monitor_agent
+        group: kic_monitor_agent
+        mode: '0644'
+
+    - name: Insert StandardOutput and StandardError after KillMode line
+      lineinfile:
+        path: /lib/systemd/system/kic_monitor_agent.service
+        insertafter: '^KillMode=control-group$'
+        line: "{{ item }}"
+        state: present
+      loop:
+        - 'StandardOutput=append:/var/log/kic_monitor_agent.log'
+        - 'StandardError=append:/var/log/kic_monitor_agent.log'
+      notify:
+        - Reload systemd
+        - Restart kic_monitor_agent
+  handlers:
+    - name: Reload systemd
+      become: yes
+      command: systemctl daemon-reload
+    - name: Restart kic_monitor_agent
+      become: yes
+      systemd:
+        name: kic_monitor_agent
+        state: restarted
+
+    - name: enable kic_monitor_agent
+      ansible.builtin.systemd:
+        name: kic_monitor_agent
+        enabled: true
+
+    - name: copy ansible.log
+      ansible.builtin.command: mv /etc/ansible/logs/daily.log /etc/ansible/logs/{{ lookup('pipe', 'date +%m_%d_%y') }}/{{ lookup('pipe', 'date +%m%d%y.%H:%M:%S') }}.log
+      delegate_to: localhost
+      run_once: true
+      ignore_errors: true
+
+
+- name: Update Hostname   # Host명 변경 태스크
+  hosts: all
+  become: true
+  tasks:
+    - name: "update hostnames" # Host명 변경
+      hostname:
+        name: "{{ inventory_hostname }}"
+
+
+- name: Install and configure Puppet agent on Ubuntu 24.04 (noble)
+  hosts: all
+  become: true
+
+  vars:
+    puppet_release_pkg_url: "https://apt.puppet.com/puppet-release-noble.deb"
+    puppet_release_pkg_path: "/tmp/puppet-release-noble.deb"
+    puppet_master_fqdn: "infra-iet-puppet-master-01.internal.example.com"   # override in inventory/group_vars
+    puppet_environment: "production"
+    puppet_runinterval: "30m"
+
+  tasks:
+    - name: Download Puppet APT release package
+      ansible.builtin.get_url:
+        url: "{{ puppet_release_pkg_url }}"
+        dest: "{{ puppet_release_pkg_path }}"
+        mode: "0644"
+
+    - name: Install Puppet APT repo
+      ansible.builtin.apt:
+        deb: "{{ puppet_release_pkg_path }}"
+        state: present
+
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install puppet-agent
+      ansible.builtin.apt:
+        name: puppet-agent
+        state: present
+
+    - name: Ensure /etc/puppet directory exists
+      ansible.builtin.file:
+        path: /etc/puppet
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Set puppet_environment based on inventory_hostname
+      ansible.builtin.set_fact:
+        puppet_environment_effective: >-
+          {% if '-pi' in inventory_hostname %}
+          pi
+          {% elif 'sandbox' in inventory_hostname or 'sbox' in inventory_hostname %}
+          sandbox
+          {% else %}
+          production
+          {% endif %}
+
+    - name: Debug phase detection
+      debug:
+        msg: "Detected phase: {{ puppet_environment_effective }} for {{ inventory_hostname }}"
+
+    - name: Configure /etc/puppet/puppet.conf
+      ansible.builtin.copy:
+        dest: /etc/puppet/puppet.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [main]
+          certname = {{ inventory_hostname }}.internal.example.com
+          server = {{ puppet_master_fqdn }}
+          environment = {{ puppet_environment_effective | default(puppet_environment) }}
+          runinterval = {{ puppet_runinterval }}
+
+          [agent]
+          include_legacy_facts = true
+          splay = true
+          splaylimit = 30m
+
+    - name: Ensure puppet service is enabled and started
+      ansible.builtin.service:
+        name: puppet
+        enabled: true
+        state: started
+
+
+- name: Deploy Facter NTP facts script
+  hosts: all
+  become: true
+  tasks:
+    - name: Create /etc/facter/facts.d directory
+      ansible.builtin.file:
+        path: /etc/facter/facts.d
+        state: directory
+        mode: '0755'
+
+    - name: Deploy enhanced NTP facts script
+      ansible.builtin.copy:
+        content: |
+          #!/bin/bash
+          # NTP Servers
+          if command -v timedatectl >/dev/null 2>&1; then
+            servers=$(timedatectl show-timesync --property=ServerName --value 2>/dev/null)
+            [ -n "$servers" ] && echo "ntp_server_name=$servers"
+
+            fallbacks=$(timedatectl show-timesync --property=FallbackNTPServers --value 2>/dev/null)
+            [ -n "$fallbacks" ] && echo "ntp_fallback_servers=$fallbacks"
+          fi
+
+          # NTP Service Status (timesyncd/chronyd/ntpd)
+          if systemctl is-active --quiet systemd-timesyncd >/dev/null 2>&1; then
+            echo "ntp_service_active=true"
+            echo "ntp_service_name=systemd-timesyncd"
+          elif systemctl is-active --quiet chronyd >/dev/null 2>&1; then
+            echo "ntp_service_active=true"
+            echo "ntp_service_name=chronyd"
+          elif systemctl is-active --quiet ntpd >/dev/null 2>&1; then
+            echo "ntp_service_active=true"
+            echo "ntp_service_name=ntpd"
+          else
+            echo "ntp_service_active=false"
+            echo "ntp_service_name=none"
+          fi
+        dest: /etc/facter/facts.d/gather_ntp_facts.sh
+        mode: '0755'
+        backup: yes
+
+
+- name: Set Time Zone   # Timezone 동기화(KST)
+  hosts: all
+  become: true
+  vars:                 # 사전에 사용 할 변수 지정
+  - my_zone: 'Asia/Seoul'
+
+  tasks:
+    - name: Show facts available on the system    # ansible_facts 조회
+      ansible.builtin.debug:
+        var: ansible_facts
+
+    - name: Check current timezone    # 현재 서버 timezone 확인
+      ansible.builtin.shell: cat /etc/timezone
+      register: current_zone_deb
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Display output of current timezone    # 현재 서비 timezone 표시
+      ansible.builtin.debug:
+        var: current_zone_deb.stdout_lines
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Check current timezone    # 현재 서버 timezone 확인
+      ansible.builtin.shell: cat /etc/localtime
+      register: current_zone_red
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: Display output of current timezone    # 현재 서비 timezone 표시
+      ansible.builtin.debug:
+        var: current_zone_red.stdout_lines
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: Set timezone variables    # timezone용 변수 지정
+      ansible.builtin.copy: content={{my_zone}}
+            dest=/etc/timezone
+            owner=root
+            group=root
+            mode=0644
+            backup=yes
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+        - current_zone_deb.stdout != my_zone
+      notify:
+        - update timezone
+
+    - name: Ensure correct timezone link is set   # timezone 설정파일 symbolic link 생성
+      ansible.builtin.file:
+        src: '/usr/share/zoneinfo/{{my_zone}}'
+        dest: /etc/localtime
+        owner: root
+        group: root
+        state: link
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Set timezone to Asia/Seoul    # timezone Asia/Seoul로 지정
+      community.general.timezone:
+        name: Asia/Seoul
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: Display output of updated timezone    # Up-to-date timezone 결과값 변수로 지정
+      ansible.builtin.shell: timedatectl | grep "Time zone"
+      register: modified_zone
+
+    - name: Display output of modified timezone   # Up-to-date timezone 표시
+      ansible.builtin.debug:
+        var: modified_zone.stdout_lines
+
+    - name: restart ryslog
+      ansible.builtin.systemd:
+        state: restarted
+        name: rsyslog
+      when:
+        - ansible_facts['distribution'] == "Rocky" or ansible_facts['distribution'] == "Ubuntu"
+
+    - name: restart cron
+      ansible.builtin.systemd:
+        state: restarted
+        name: cron
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: copy ansible.log
+      ansible.builtin.command: mv /etc/ansible/logs/daily.log /etc/ansible/logs/{{ lookup('pipe', 'date +%m_%d_%y') }}/{{ lookup('pipe', 'date +%m%d%y.%H:%M:%S') }}.log
+      delegate_to: localhost
+      run_once: true
+      ignore_errors: true
+
+  handlers:
+    - name: update timezone   # timezone 설정 적용
+      command: dpkg-reconfigure --frontend noninteractive tzdata

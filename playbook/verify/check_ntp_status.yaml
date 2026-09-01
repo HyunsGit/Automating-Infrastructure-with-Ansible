@@ -1,0 +1,137 @@
+---
+- name: Check timesync and RTC vs local time per host
+  hosts: all
+  become: yes
+  strategy: linear  # Default, works with add_host
+  serial: "30%"     # Process 30% of hosts at a time
+  gather_facts: yes  # Required for ansible_facts['distribution']
+  tasks:
+    - name: Install mandatory packages(for Ubuntu 24.04)   # 패키지 설치(Ubuntu)
+      ansible.builtin.apt:
+        pkg:
+        - util-linux-extra
+      ignore_errors: true
+      when:
+        -  "'24.04' in ansible_facts['distribution_version']"
+
+    - name: Check if systemd-timesyncd service file exists (Ubuntu)
+      stat:
+        path: /lib/systemd/system/systemd-timesyncd.service
+      register: timesyncd_service_file
+      when: ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Get systemd-timesyncd service status (Ubuntu)
+      command: systemctl status systemd-timesyncd.service
+      register: timesyncd_status
+      failed_when:
+        - timesyncd_status.rc != 0
+        - "'masked' not in timesyncd_status.stdout"
+      ignore_errors: yes
+      when: ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Check if chronyd service file exists (Rocky)
+      stat:
+        path: /lib/systemd/system/chronyd.service
+      register: chronyd_service_file
+      when: ansible_facts['distribution'] == "Rocky"
+
+    - name: Get chronyd service status (Rocky)
+      command: systemctl status chronyd.service
+      register: chronyd_status
+      failed_when:
+        - chronyd_status.rc != 0
+        - "'masked' not in chronyd_status.stdout"
+      ignore_errors: yes
+      when: ansible_facts['distribution'] == "Rocky"
+
+    - name: Get chronyc tracking status (Rocky) - sync check
+      command: chronyc tracking
+      register: chronyc_tracking
+      ignore_errors: yes
+      changed_when: false
+      when: ansible_facts['distribution'] == "Rocky"
+
+    - name: Get RTC time using hwclock
+      command: hwclock --show
+      register: rtc_time
+      ignore_errors: yes
+
+    - name: Get local system time
+      command: date "+%Y-%m-%d %H:%M:%S"
+      register: local_time
+
+    - name: Check difference in seconds (approximate)
+      shell: |
+        rtc_epoch=$(hwclock --show --utc | xargs -I{} date -d "{}" +%s || echo 0)
+        local_epoch=$(date +%s)
+        echo $((local_epoch - rtc_epoch))
+      register: time_diff
+      ignore_errors: yes
+
+    - name: Set tab character
+      set_fact:
+        tab_char: "\u0009"
+
+    - name: Prepare combined status line for Ubuntu
+      set_fact:
+        combined_status_line: >-
+          {{
+            [
+              inventory_hostname,
+              ('masked' if 'masked' in (timesyncd_status.stdout | default('')) else
+              (timesyncd_status.stdout_lines[1].split()[1] if timesyncd_status.stdout_lines is defined and timesyncd_status.stdout_lines|length > 1 else 'unknown')),
+              ("/lib/systemd/system/systemd-timesyncd.service exists" if timesyncd_service_file.stat.exists else "/lib/systemd/system/systemd-timesyncd.service does not exist"),
+              "Time difference between local time and RTC (seconds): " ~ (time_diff.stdout | default('Unable to calculate')),
+              (rtc_time.stdout[:19] if rtc_time.stdout is defined else 'RTC time unavailable')
+            ]
+            | join(tab_char)
+          }}
+      when: ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Prepare combined status line for Rocky
+      set_fact:
+        combined_status_line: >-
+          {{
+            [
+              inventory_hostname,
+              ('masked' if 'masked' in (chronyd_status.stdout | default('')) else
+              (chronyd_status.stdout_lines[1].split()[1] if chronyd_status.stdout_lines is defined and chronyd_status.stdout_lines|length > 1 else 'unknown')),
+              ("/lib/systemd/system/chronyd.service exists" if chronyd_service_file.stat.exists else "/lib/systemd/system/chronyd.service does not exist"),
+              "Chrony sync status: " ~ ("Synchronized" if "'Leap status' in (chronyc_tracking.stdout | default('')) and 'Not synchronised' not in chronyc_tracking.stdout else "Not synchronized"),
+              (rtc_time.stdout[:19] if rtc_time.stdout is defined else 'RTC time unavailable')
+            ]
+            | join(tab_char)
+          }}
+      when: ansible_facts['distribution'] == "Rocky"
+
+    - name: Set default status for unsupported distros
+      set_fact:
+        combined_status_line: >-
+          {{ [
+            inventory_hostname,
+            "unsupported",
+            "Distribution: " + (ansible_facts['distribution'] | default('unknown')),
+            "Time difference: " ~ (time_diff.stdout | default('Unable to calculate')),
+            (rtc_time.stdout[:19] if rtc_time.stdout is defined else 'RTC time unavailable')
+          ] | join(tab_char) }}
+      when: 
+        - ansible_facts['distribution'] != "Ubuntu"
+        - ansible_facts['distribution'] != "Rocky"
+
+    - name: Add host with combined status fact
+      add_host:
+        name: "{{ inventory_hostname }}"
+        combined_status_line: "{{ combined_status_line }}"
+
+- name: Aggregate combined status lines on control node
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Get all hosts with combined_status_line fact
+      set_fact:
+        all_combined_status_lines: "{{ groups['all'] | map('extract', hostvars, 'combined_status_line') | list | select('defined') | list }}"
+
+    - name: Write all combined status lines to file
+      copy:
+        content: "{{ all_combined_status_lines | join('\n') + '\n' }}"
+        dest: /home/scv/ntp-status-summary.tsv

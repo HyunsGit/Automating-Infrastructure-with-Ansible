@@ -1,0 +1,33 @@
+---
+- name: Change os open file limit
+  hosts: all
+  become: yes
+  tasks:    
+    - name: check for limits.conf
+      stat:
+        path: /etc/security/limits.conf
+      register: limits
+      changed_when: not limits.stat.exists
+    - name: change os open file limit
+      blockinfile: 
+            path: /etc/security/limits.conf
+            marker: "#{mark} block1"
+            block: |
+                drone soft nofile 655350
+                drone hard nofile 655350
+      when: "'drone' not in limits"
+    - name: delete ansible block
+      ansible.builtin.lineinfile:
+        path: /etc/profile
+        state: absent
+        regexp: 'BEGIN'
+      ignore_errors: true
+    - name: delete ansible block
+      ansible.builtin.lineinfile:
+        path: /etc/profile
+        state: absent
+        regexp: 'END'
+      ignore_errors: true
+    - name: reboot machine and send a message
+      ansible.builtin.reboot:
+        msg: "Rebooting machine in 5 seconds"

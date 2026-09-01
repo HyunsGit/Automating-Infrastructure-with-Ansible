@@ -1,0 +1,113 @@
+---
+- name: Install filebeats for VM
+  hosts: all
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Download filebeat package(Ubuntu)
+      ansible.builtin.get_url:
+        url: https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-7.17.18-amd64.deb
+        dest: /home/{{ ansible_facts['distribution'] | lower }}
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+    - name: Download filebeat package(Rocky)
+      ansible.builtin.get_url:
+        url: https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-7.17.18-x86_64.rpm
+        dest: /home/{{ ansible_facts['distribution'] | lower }}
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+
+    - name: Install filebeat via dpkg(Ubuntu)
+      ansible.builtin.apt:
+        deb: /home/ubuntu/filebeat-7.17.18-amd64.deb
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+    - name: Install filebeat via rpm(Rocky)
+      ansible.builtin.dnf:
+        name: /home/{{ ansible_facts['distribution'] | lower }}/filebeat-7.17.18-x86_64.rpm
+        state: present
+        disable_gpg_check: true
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+
+    - name: Create system-filebeat directory
+      ansible.builtin.file:
+        path: /etc/filebeat/system-config
+        state: directory
+        mode: "0755"
+
+    - name: Configure system-filebeat directory
+      ansible.builtin.copy:
+        src: /etc/filebeat/modules.d
+        dest: /etc/filebeat/system-config
+        owner: root
+        group: root
+        mode: "0644"
+        remote_src: true
+
+    - name: Remove old system-filebeat configuration
+      ansible.builtin.file:
+        path: "/etc/filebeat/system-config/system-filebeat.yml"
+        state: absent
+      ignore_errors: true
+
+
+    - name: Copy system-filebeat configuration(Ubuntu)
+      ansible.builtin.copy:
+        src: /etc/ansible/roles/system-filebeat.yml
+        dest: /etc/filebeat/system-config/system-filebeat.yml
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+    - name: Copy system-filebeat configuration(Rocky)
+      ansible.builtin.copy:
+        src: /etc/ansible/roles/system-filebeat-rocky.yml
+        dest: /etc/filebeat/system-config/system-filebeat.yml
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+
+    - name: Check if system_filebeat daemon exists
+      ansible.builtin.stat:
+        path: /lib/systemd/system/system-filebeat.service
+      register: system_filebeat
+      ignore_errors: true
+
+    - name: Check mdate for /lib/systemd/system/system-filebeat.service
+      ansible.builtin.shell: "date -r /lib/systemd/system/system-filebeat.service +%s"
+      register: bmdate
+      changed_when: not system_filebeat.stat.exists
+      ignore_errors: true
+
+    - name: Remove old system-filebeat daemon
+      ansible.builtin.file:
+        path: "/lib/systemd/system/system-filebeat.service"
+        state: absent
+      ignore_errors: true
+
+    - name: Configure system-filebeat daemon
+      ansible.builtin.copy:
+        src: /etc/ansible/roles/system-filebeat.service
+        dest: /lib/systemd/system/system-filebeat.service
+
+    - name: Check mdate for /lib/systemd/system/system-filebeat.service(Ubuntu)
+      ansible.builtin.shell: "date -r /lib/systemd/system/system-filebeat.service +%s"
+      register: amdate
+      changed_when: not system_filebeat.stat.exists
+      ignore_errors: true
+
+    - name: Force systemd to reread configs
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Restart system-filebeat
+      ansible.builtin.systemd:
+        state: restarted
+        name: system-filebeat
+
+    - name: Enable system-filebeat
+      ansible.builtin.systemd:
+        name: system-filebeat
+        enabled: true
+    

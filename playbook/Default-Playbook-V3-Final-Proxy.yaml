@@ -1,0 +1,1025 @@
+# 필수 Ansible Playbook 실행
+# - Route53 A레코드 등록
+# - OS 업데이트(필수 패키지 설치)
+# - Host명 변경
+# - 기본 OS 계정 생성
+# - Ulimit값 최대화
+# - Filebeat 설치 for VM
+# - KC Node Exporter 설치
+# - Promtail 설치
+# - DNS 서버 등록
+# - NTP 서버 등록
+# - Password Authentication SSH 허용(Ubuntu/Rocky)
+# - Timezone 동기화(KST)
+
+---
+- name: Create Route53 Record   # Route53 A레코드 등록
+  hosts: localhost
+  gather_facts: true
+  vars:
+    aws_access_key: "{{ vault_aws_access_key }}"
+    aws_secret_key: "{{ vault_aws_secret_key }}"
+    aws_region: "ap-northeast-2"
+    route53_zone: "internal.example.com"
+  tasks:
+    - name: Create or update Route53 records from inventory
+      amazon.aws.route53:
+        state: present
+        zone: "{{ route53_zone }}"
+        record: "{{ item }}.{{ route53_zone }}."
+        type: A
+        ttl: 600
+        value: "{{ hostvars[item]['ansible_host'] | default(hostvars[item]['private_ip'] | default('')) }}"
+        overwrite: true
+      loop: "{{ groups['all'] }}"
+      delegate_to: localhost
+      when: hostvars[item]['ansible_host'] is defined or hostvars[item]['private_ip'] is defined
+      environment:
+        AWS_ACCESS_KEY_ID: "{{ aws_access_key }}"
+        AWS_SECRET_ACCESS_KEY: "{{ aws_secret_key }}"
+        AWS_REGION: "{{ aws_region }}"
+
+- name: Update All OS  # OS 업데이트(필수 패키지 설치) 태스크
+  hosts: all
+  become: true
+  gather_facts: true
+  vars:
+    http_proxy: "http://proxy.internal.example.com:3128"
+    https_proxy: "http://proxy.internal.example.com:3128"
+  tasks:
+    - name: Update and upgrade apt packages
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 86400 # 1 day
+        state: fixed
+      environment:
+        http_proxy: "{{http_proxy}}"
+        https_proxy: "{{https_proxy}}"
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Update all packages to their latest version
+      ansible.builtin.apt:
+        name: "*"
+        state: latest
+      environment:
+        http_proxy: "{{http_proxy}}"
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Install mandatory packages(Ubuntu)   # 패키지 설치(Ubuntu)
+      ansible.builtin.apt:
+        pkg:
+        - nfs-common
+        - net-tools
+        - dnsutils
+        - traceroute
+      ignore_errors: true
+      environment:
+        http_proxy: "{{http_proxy}}"
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Update installed packages(Rocky)    # 패키지 업데이트(Rocky)
+      ansible.builtin.dnf:
+        state: latest
+        update_only: true
+      ignore_errors: true
+      environment:
+        http_proxy: "{{http_proxy}}"
+        https_proxy: "{{https_proxy}}"
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    #- name: Enable devel(Rocky)    # 추가 패키지 설치를 위한 repo 활성화(Rocky)
+    #  community.general.dnf_config_manager:
+    #    name: devel
+    #    state: enabled
+    #  when:
+    #    - ansible_facts['distribution'] == "Rocky"
+
+    - name: Install mandatory packages(Rocky)    # 필수 패키지 설치(Rocky)
+      ansible.builtin.dnf:
+        name:
+          - yum-utils
+          - dnsutils
+          - nc
+          - redhat-lsb-core
+          - net-tools
+          - nfs-utils
+          - vim
+        state: latest
+      ignore_errors: true
+      environment:
+        http_proxy: "{{http_proxy}}"
+        https_proxy: "{{https_proxy}}"
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+- name: Register Private DNS Server   # 내부 DNS 서버 활성화
+  hosts: all
+  become: true
+  vars:
+    proxy: "http://proxy.internal.example.com:3128"
+  tasks:
+    # - name: Install systemd-resolved(Rocky)   # systemd-resolved 서비스 생성(Rocky)
+    #   ansible.builtin.package:
+    #     name: systemd-resolved
+    #     state: latest
+    #   ignore_errors: true
+    #   # environment:
+    #   #   proxy: "{{proxy}}"
+    #   when:
+    #     - ansible_facts['distribution'] == "Rocky"
+
+    # - name: Enable systemd-resolved(Rocky)   # systemd-resolved 서비스 활성화(Rocky)
+    #   ansible.builtin.systemd_service:
+    #     name: systemd-resolved
+    #     enabled: true
+    #   when:
+    #     - ansible_facts['distribution'] == "Rocky"
+
+    - name: Remove deprecated dns configuration    # Deprecated된 dns 설정 제거
+      ansible.builtin.file:
+        path: "/etc/systemd/resolved.conf"
+        state: absent
+      ignore_errors: true
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Configure dns service   # 내부 DNS 사용을 위한 systemd-resolved 설정 추가
+      ansible.builtin.copy:
+        src: /etc/ansible/roles/systemd-resolved.conf
+        dest: /etc/systemd/resolved.conf
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Force systemd to reread configs   # 서비스 데몬 리로드
+      ansible.builtin.systemd:
+        daemon_reload: true
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Restart systemd-resolved    # systemd-resolved 서비스 재시작
+      ansible.builtin.systemd:
+        state: restarted
+        name: systemd-resolved
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+- name: Register Private DNS Server   # 내부 DNS 서버 활성화
+  hosts: all
+  become: true
+  tasks:
+    - name: Install NetworkManager if not already installed
+      ansible.builtin.package:
+        name: NetworkManager
+        state: present
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: Configure DNS settings with search domain
+      community.general.nmcli:
+        conn_name: "{{ ansible_default_ipv4.interface }}"
+        type: ethernet
+        method4: auto
+        dns4:
+          - 8.8.8.8
+          - 1.1.1.1
+        dns4_search:
+          - internal.example.com
+        state: present
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: Ensure "search internal.example.com" is appended to /etc/resolv.conf
+      ansible.builtin.lineinfile:
+        path: /etc/resolv.conf
+        line: 'search internal.example.com'
+        state: present
+        insertafter: EOF
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: Restart NetworkManager to apply changes   # NetworkManager 재시작
+      ansible.builtin.systemd:
+        name: NetworkManager
+        state: restarted
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+- name: Update Hostname   # Host명 변경 태스크
+  hosts: all
+  become: true
+  tasks:
+    - name: "update hostnames" # Host명 변경
+      hostname:
+        name: "{{ inventory_hostname }}"
+
+
+- name: Create Default OS users   # 기본 OS 계정 생성 태스크
+  hosts: all
+  become: true
+  tasks:
+    - name: Determine available users   # OS 내 계정 조회
+      getent:
+        database: passwd
+
+    - name: Set fact when OS users exist   # 기본 OS 계정이 있을 때 변수 지정
+      set_fact:
+        existence: ex
+      when: '"scv" in item.key or "probe" in item.key or "drone" in item.key or "marine" in item.key or "zealot" in item.key'
+      loop: "{{ ansible_facts.getent_passwd | dict2items }}"
+
+    - name: Set fact when OS users do not exist    # 기본 OS 계정이 없을 때 변수 지정
+      set_fact:
+        existence: notex
+      when: '"scv" not in item.key or "probe" not in item.key or "drone" not in item.key or "marine" not in item.key or "zealot" not in item.key'
+      loop: "{{ ansible_facts.getent_passwd | dict2items }}"
+
+    - name: Ensure user groups exist with matching GID  # 그룹 생성 및 GID 명시
+      ansible.builtin.group:
+        name: "{{ item.group }}"
+        gid: "{{ item.gid }}"
+        state: present
+      loop:
+        - { group: scv, gid: 300 }
+        - { group: probe, gid: 301 }
+        - { group: drone, gid: 302 }
+        - { group: marine, gid: 303 }
+        - { group: zealot, gid: 304 }
+
+    - name: Add default OS users with matching GID primary group  # 사용자 생성 및 Primary Group 지정
+      ansible.builtin.user:
+        name: "{{ item.user }}"
+        uid: "{{ item.uid }}"
+        group: "{{ item.user }}"    # 그룹명과 사용자명이 같음
+        password: "{{ item.pw | password_hash('sha512') }}"
+        create_home: true
+        system: false
+        shell: /bin/bash
+      when:
+        - existence == 'notex'
+      loop:
+        - { user: scv, uid: 300, pw: "<REDACTED>" }
+        - { user: probe, uid: 301, pw: "<REDACTED>" }
+        - { user: drone, uid: 302, pw: "<REDACTED>" }
+        - { user: marine, uid: 303, pw: "<REDACTED>" }
+        - { user: zealot, uid: 304, pw: "<REDACTED>" }
+
+- name: Change Group Ownership for Home Directory
+  hosts: all
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Change Group Ownership for Home Directory
+      ansible.builtin.file:
+        path: "/home/{{ item.path }}"
+        state: directory
+        recurse: yes
+        owner: "{{ item.owner }}"
+        group: "{{ item.group }}"
+      loop:
+        - { path: scv, owner: scv, group: scv }
+        - { path: probe, owner: probe, group: probe }
+        - { path: drone, owner: drone, group: drone }
+        - { path: marine, owner: marine, group: marine }
+        - { path: zealot, owner: zealot, group: zealot }
+      ignore_errors: true
+
+    - name: Check if scv(인프라팀) defined in sudoers
+      ansible.builtin.lineinfile:
+        state: absent
+        path: "/etc/sudoers"
+        regexp: "^scv"
+      check_mode: true
+      changed_when: false
+      register: scv
+
+    - name: Check if probe(보안팀) defined in sudoers
+      ansible.builtin.lineinfile:
+        state: absent
+        path: "/etc/sudoers"
+        regexp: "^probe"
+      check_mode: true
+      changed_when: false
+      register: probe
+
+    - name: Check if drone(DB팀) defined in sudoers
+      ansible.builtin.lineinfile:
+        state: absent
+        path: "/etc/sudoers"
+        regexp: "^drone"
+      check_mode: true
+      changed_when: false
+      register: drone
+
+    - name: Check if marine(개발팀) defined in sudoers
+      ansible.builtin.lineinfile:
+        state: absent
+        path: "/etc/sudoers"
+        regexp: "^marine"
+      check_mode: true
+      changed_when: false
+      register: marine
+
+    - name: Check if zealot(외주) defined in sudoers
+      ansible.builtin.lineinfile:
+        state: absent
+        path: "/etc/sudoers"
+        regexp: "^zealot"
+      check_mode: true
+      changed_when: false
+      register: zealot
+
+    - name: Grant sudoers if not defined(scv)
+      ansible.builtin.lineinfile:
+        state: present
+        path: "/etc/sudoers"
+        line: "scv  ALL=(ALL) NOPASSWD:ALL"
+      when: scv.found == 0
+
+    - name: Grant sudoers if not defined(probe)
+      ansible.builtin.lineinfile:
+        state: present
+        path: "/etc/sudoers"
+        line: "probe  ALL=(ALL) NOPASSWD:ALL"
+      when: probe.found == 0
+
+    - name: Grant sudoers if not defined(drone)
+      ansible.builtin.lineinfile:
+        state: present
+        path: "/etc/sudoers"
+        line: "drone  ALL=(ALL) NOPASSWD:ALL"
+      when: drone.found == 0
+
+    - name: Grant sudoers if not defined(marine)
+      ansible.builtin.lineinfile:
+        state: present
+        path: "/etc/sudoers"
+        line: "marine  ALL=(ALL) NOPASSWD:ALL"
+      when: marine.found == 0
+
+    - name: Grant sudoers if not defined(zealot)
+      ansible.builtin.lineinfile:
+        state: present
+        path: "/etc/sudoers"
+        line: "zealot  ALL=(ALL) NOPASSWD:ALL"
+      when: zealot.found == 0
+
+    - name: Check if 'Banner' exists in /etc/ssh/sshd_config
+      ansible.builtin.lineinfile:
+        state: absent
+        path: "/etc/ssh/sshd_config"
+        regexp: "^Banner"
+      check_mode: true
+      changed_when: false
+      register: banner
+
+    - name: Delete deprecated AllowUsers
+      ansible.builtin.shell: sudo sed -i '/AllowUsers/d' /etc/ssh/sshd_config
+
+    - name: Allow password authentication for SSH
+      ansible.builtin.shell: sudo sed -i 's/PasswordAuthentication\ no/PasswordAuthentication\ yes/g' /etc/ssh/sshd_config
+
+    - name: Define 'Banner' if not exists
+      ansible.builtin.lineinfile:
+        state: present
+        path: "/etc/ssh/sshd_config"
+        line: "Banner /etc/issue"
+      when: banner.found == 0
+
+    - name: Add AllowUsers in sshd_config(Ubuntu)
+      ansible.builtin.lineinfile:
+        dest: /etc/ssh/sshd_config
+        line: "AllowUsers scv probe drone marine zealot ubuntu"
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Add AllowUsers in sshd_config(Rocky)
+      ansible.builtin.lineinfile:
+        dest: /etc/ssh/sshd_config
+        line: "AllowUsers scv probe drone marine zealot rocky"
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: Create ssh login banner
+      ansible.builtin.script: /etc/ansible/scripts/ssh_banner.sh
+      ignore_errors: true
+
+- name: Modify Ulimit   # Ulimit값 최대화
+  hosts: all
+  become: true
+  tasks:
+    - name: Add or modify nofile limit for the users
+      pam_limits:
+        domain: root
+        limit_type: "{{ item }}"
+        limit_item: nofile
+        value: 655350
+        use_max: yes
+      with_items:
+        - soft
+        - hard
+
+    - name: Add or modify nofile limit for the users
+      pam_limits:
+        domain: '*'
+        limit_type: "{{ item }}"
+        limit_item: nofile
+        value: 655350
+        use_max: yes
+      with_items:
+        - soft
+        - hard
+
+    - name: Add or modify nproc limit for the users
+      pam_limits:
+        domain: root
+        limit_type: "{{ item }}"
+        limit_item: nproc
+        value: 65535
+        use_max: yes
+      with_items:
+        - soft
+        - hard
+
+    - name: Add or modify nproc limit for the users
+      pam_limits:
+        domain: '*'
+        limit_type: "{{ item }}"
+        limit_item: nproc
+        value: 655350
+        use_max: yes
+      with_items:
+        - soft
+        - hard
+
+    - name: Read the file contents
+      slurp:
+        src: /etc/security/limits.conf
+      register: ulimit
+
+- name: Install filebeats for VM    # Filebeats 설치
+  hosts: all
+  become: true
+  gather_facts: true
+  vars:
+    http_proxy: "http://proxy.internal.example.com:3128"
+    https_proxy: "http://proxy.internal.example.com:3128"
+  tasks:
+    - name: Download filebeats package(Ubuntu)   # filebeats 패키지 다운로드(Ubuntu)_ver.8.17.10 2025.11.25 update
+      ansible.builtin.get_url:
+        url: https://objectstorage.kr-central-2.your-cloud.example.com/v1/<PROJECT_ID>/infra-zone-middleware/elasticsearch/8.17.10/filebeat-8.17.10-amd64.deb
+        dest: /home/{{ ansible_facts['distribution'] | lower }}
+      environment:
+        http_proxy: "{{http_proxy}}"
+        https_proxy: "{{https_proxy}}"
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Download filebeats package(Rocky)    # filebeat 패카지 다운로드(Rocky)_ver.8.17.10 2025.11.25 update
+      ansible.builtin.get_url:
+        url: https://objectstorage.kr-central-2.your-cloud.example.com/v1/<PROJECT_ID>/infra-zone-middleware/elasticsearch/8.17.10/filebeat-8.17.10-x86_64.rpm
+        dest: /home/{{ ansible_facts['distribution'] | lower }}
+      environment:
+        http_proxy: "{{http_proxy}}"
+        https_proxy: "{{https_proxy}}"        
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: Install filebeat via dpkg(Ubuntu)   # Filebeats 패키지 설치(Ubuntu)
+      ansible.builtin.apt:
+        deb: /home/ubuntu/filebeat-8.17.10-amd64.deb
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Install filebeat via rpm(Rocky)   # Filebeats 패키지 설치(Rocky)
+      ansible.builtin.dnf:
+        name: /home/{{ ansible_facts['distribution'] | lower }}/filebeat-8.17.10-x86_64.rpm
+        state: present
+        disable_gpg_check: true
+      ignore_errors: true
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: Create system-filebeat directory    # Filebeats config용 directory 생성
+      ansible.builtin.file:
+        path: /etc/filebeat-8.17/system-config
+        state: directory
+        mode: "0755"
+
+    - name: Configure system-filebeat directory   # Filebeats config용 directory 권한 설정
+      ansible.builtin.copy:
+        src: /etc/filebeat/modules.d
+        dest: /etc/filebeat-8.17/system-config
+        owner: root
+        group: root
+        mode: "0644"
+        remote_src: true
+
+    - name: Remove old system-filebeat configuration    # Deprecated된 filebeats config 제거
+      ansible.builtin.file:
+        path: "/etc/filebeat-8.17/system-config/system-filebeat.yml"
+        state: absent
+      ignore_errors: true
+
+    - name: Copy system-filebeat configuration(Ubuntu)    # Up-to-date filebeats config 생성(Ubuntu)
+      ansible.builtin.copy:
+        src: /etc/ansible/roles/system-filebeat8.yml
+        dest: /etc/filebeat-8.17/system-config/system-filebeat.yml
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"   # Up-to-date filebeats config 생성(Ubuntu)
+
+    - name: Copy system-filebeat configuration(Rocky)
+      ansible.builtin.copy:
+        src: /etc/ansible/roles/system-filebeat8-rocky.yml
+        dest: /etc/filebeat-8.17/system-config/system-filebeat.yml
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: Check if system_filebeat daemon exists    # Filebeats 서비스 존재 유무 확인
+      ansible.builtin.stat:
+        path: /lib/systemd/system/system-filebeat8.service
+      register: system_filebeat8
+      ignore_errors: true
+
+    - name: Remove old system-filebeat daemon   # Deprecated된 filebeats 서비스 제거
+      ansible.builtin.file:
+        path: "/lib/systemd/system/system-filebeat8.service"
+        state: absent
+      ignore_errors: true
+
+    - name: Configure system-filebeat daemon    # Up-to-date filebeats 서비스 생성
+      ansible.builtin.copy:
+        src: /etc/ansible/roles/system-filebeat8.service
+        dest: /lib/systemd/system/system-filebeat8.service
+
+    - name: Force systemd to reread configs   # 서비스 데몬 리로드
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Restart system-filebeat   # Filebeats 서비스 재시작
+      ansible.builtin.systemd:
+        state: restarted
+        name: system-filebeat8
+
+    - name: Enable system-filebeat    # Filebeats 서비스 활성화
+      ansible.builtin.systemd:
+        name: system-filebeat8
+        enabled: true
+
+- name: Install KC-Node-Exporter    # KC인프라용 node exporter 설치(prometheus 모니터링용)
+  hosts: all
+  become: true
+  vars:
+    http_proxy: "http://proxy.internal.example.com:3128"
+    https_proxy: "https://proxy.internal.example.com:3128"
+  tasks:
+    - name: Check if kc_node_exporter zip exists    # KC node exporter 설치 패키지 존재 유무 확인
+      ansible.builtin.stat:
+        path: /home/{{ ansible_facts['distribution'] | lower }}/node_exporter-1.6.0.linux-amd64/node_exporter
+      register: kc_node_exporter
+
+    - name: Download and unextract kc_node_exporter package   # KC node exporter 없을 시 패키지 다운로드 및 압축 해제
+      ansible.builtin.unarchive:
+        src: https://github.com/prometheus/node_exporter/releases/download/v1.6.0/node_exporter-1.6.0.linux-amd64.tar.gz
+        dest: /home/{{ ansible_facts['distribution'] | lower }}
+        remote_src: true
+      environment:
+        http_proxy: "{{http_proxy}}"
+        https_proxy: "{{https_proxy}}"      
+      when:
+        not kc_node_exporter.stat.exists
+
+    - name: Determine available users   # OS 유저 정보 확인
+      getent:
+        database: passwd
+
+    - name: Set fact when node_exporter exists    # node_exporter OS 유저 있을 시 변수 지정
+      set_fact:
+        user_exists: true
+      when: '"node_exporter" in item.key'
+      loop: "{{ ansible_facts.getent_passwd | dict2items }}"
+
+    - name: Set fact when node_exporter does not exists   # node_exporter OS 유저 없을 시 변수 지정
+      set_fact:
+        user_exists: false
+      when: '"node_exporter" not in item.key'
+      loop: "{{ ansible_facts.getent_passwd | dict2items }}"
+
+    - name: Add user for node_exporter    # OS 유저 'node exporter' 생성
+      ansible.builtin.user:
+        name: node_exporter
+        create_home: false
+        system: true
+        shell: /bin/false
+      when:
+        not user_exists
+
+    - name: Check if kc_node_exporter directory exists    # node exporter용 실행 파일 디렉터리 존재 유무 확인
+      ansible.builtin.stat:
+        path: /usr/local/bin/node_exporter
+      register: kc_node_exporter_directory
+
+    - name: Search deprecated node_exporter daemon    # Deprecated된 node_exporter 서비스 조회
+      ansible.builtin.find:
+        paths: /etc/systemd/system/
+        patterns: "^node_exporter.*"
+        use_regex: true
+        file_type: file
+      register: unused_node_exporter_data
+
+    - name: Remove unused node_exporter data    # Deprecated된 node_exporter 서비스 자원 제거
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      with_items: "{{ unused_node_exporter_data.files }}"
+
+    - name: Copy node_exporter configs to /usr/local/bin    # Up-to-date node_exporter config 생성
+      ansible.builtin.copy:
+        src: /home/{{ ansible_facts['distribution'] | lower }}/node_exporter-1.6.0.linux-amd64/node_exporter
+        dest: /usr/local/bin
+        remote_src: true
+      when: not kc_node_exporter_directory.stat.exists
+
+    - name: Change file ownership, group and permissions of node_exporter   # node_exporter 서비스 권한 변경
+      ansible.builtin.file:
+        path: /usr/local/bin/node_exporter
+        owner: node_exporter
+        group: node_exporter
+        mode: 0755
+
+    - name: Import environment variable for node exporter(for monitoring systemd service)
+      ansible.builtin.copy:
+        src: /etc/ansible/roles/node_exporter_lb
+        dest: /etc/default
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Check if kc_node_exporter daemon exists   # node_exporter 데몬 서비스 존재 유무 확인
+      ansible.builtin.stat:
+        path: /etc/systemd/system/node_exporter.service
+      register: kc_node_exporter_service
+      ignore_errors: true
+
+    - name: Copy systemd service file to server   # Up-to-date node_exporter 서비스 생성
+      ansible.builtin.copy:
+        src: /etc/ansible/roles/node_exporter.service
+        dest: /etc/systemd/system
+        # remote_src: true
+      when: not kc_node_exporter_service.stat.exists
+
+    - name: Force systemd to reread configs   # 서비스 데몬 리로드
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Restart node_exporter   # node exporter 서비스 재시작
+      ansible.builtin.systemd:
+        state: restarted
+        name: node_exporter
+
+    - name: Enable node_exporter    # node exporter 서비스 활성화
+      ansible.builtin.systemd:
+        name: node_exporter
+        enabled: true
+
+- name: Install Promtail
+  hosts: all
+  become: true
+  tasks:
+    # - name: Restart promtail    # promtail 서비스 재시작
+    #   ansible.builtin.systemd:
+    #     state: stopped
+    #     name: promtail
+    #   ignore_errors: true
+
+    - name: Copy promtail executable file
+      ansible.builtin.copy:
+        src: /etc/ansible/packages/promtail-linux-amd64
+        dest: /home/scv
+        owner: scv
+        group: scv
+        mode: '0755'
+
+    - name: Move promtail executable under /usr/local/bin
+      ansible.builtin.shell:
+        cmd: sudo cp /home/scv/promtail-linux-amd64 /usr/local/bin/promtail
+      ignore_errors: true
+
+
+    - name: Create a directory for promtail
+      ansible.builtin.file:
+        path: /etc/promtail
+        state: directory
+        mode: '0755'
+
+    - name: Create a directory for promtail
+      ansible.builtin.file:
+        path: /etc/promtail/logs
+        state: directory
+        mode: '0755'
+
+    - name: Create promtail config file
+      ansible.builtin.file:
+        path: /etc/promtail/promtail-config.yaml
+        state: touch
+        mode: u+rw,g+rw,o+r
+
+    - name: Import promtail config
+      template:
+        src: /etc/ansible/templates/promtail.cfg.j2
+        dest: /etc/promtail/promtail-config.yaml
+      ignore_errors: true
+
+    - name: Copy promtail executable file
+      ansible.builtin.copy:
+        src: /etc/ansible/roles/promtail.service
+        dest: /etc/systemd/system
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Force systemd to reread configs
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Restart promtail
+      ansible.builtin.systemd:
+        state: restarted
+        name: promtail
+
+    - name: Enable promtail
+      ansible.builtin.systemd:
+        name: promtail
+        enabled: true
+
+- name: Register NTP Server   # NTP 서버 등록
+  hosts: all
+  become: true
+  tasks:
+    - name: Remove deprecated NTP server IP(Ubuntu)   # Deprecated된 NTP 서버 IP 제거(Ubuntu)
+      ansible.builtin.shell: sudo sed -i '/<NTP_SERVER_IP>/d' /etc/systemd/timesyncd.conf
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Remove deprecated NTP server IP(Rocky)    # Deprecated된 NTP 서버 IP 제거(Rocky)
+      ansible.builtin.shell: sudo sed -i '/pool 2.rocky.pool.ntp.org iburst/d' /etc/chrony.conf
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: Verify if '<NTP_SERVER_IP>' ntp address already exists(Ubuntu)   # Up-to-date NTP 서버 IP 주소 유무 확인(Rocky)
+      ansible.builtin.shell: cat /etc/systemd/timesyncd.conf | grep -c <NTP_SERVER_IP> || true
+      register: ntp_grep_deb
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Verify if '<NTP_SERVER_IP>' ntp address already exists(Rocky)    # Up-to-date NTP 서버 IP 주소 유무 확인(Rocky)
+      ansible.builtin.shell: cat /etc/chrony.conf | grep -c <NTP_SERVER_IP> || true
+      register: ntp_grep_red
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: Add config on timesyncd.conf(Ubuntu)    # Up-to-date NTP 서버 IP 주소 timesyncd.conf에 추가(Ubuntu)
+      ansible.builtin.blockinfile:
+        dest: /etc/systemd/timesyncd.conf
+        insertafter: '[Time]'
+        block: |
+          NTP=server <NTP_SERVER_IP>
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+        - ntp_grep_deb.stdout == "0"
+
+    - name: Add config on chrony.conf(Rocky)    # Up-to-date NTP 서버 IP 주소 timesyncd.conf에 추가(Rocky)
+      ansible.builtin.blockinfile:
+        dest: /etc/chrony.conf
+        insertafter: '# Please consider joining the pool (https://www.pool.ntp.org/join.html).'
+        block: |
+          server infra-ntp-01.internal.example.com iburst prefer
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+        - ntp_grep_red.stdout == "0"
+
+    - name: Delete ansible block(Ubuntu)    # Ansible block 주석 제거(Ubuntu)
+      ansible.builtin.lineinfile:
+        path: /etc/systemd/timesyncd.conf
+        state: absent
+        regexp: 'ANSIBLE'
+      ignore_errors: true
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Delete ansible block(Rocky)   # Ansible block 주석 제거(Rocky)
+      ansible.builtin.lineinfile:
+        path: /etc/chrony.conf
+        state: absent
+        regexp: 'ANSIBLE'
+      ignore_errors: true
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+
+    - name: Force systemd to reread configs   # 서비스 데몬 리로드
+      ansible.builtin.systemd:
+        daemon_reload: yes
+
+    - name: Restart timedatectl(Ubuntu)   # timedatectl 서비스 재시작(Ubuntu)
+      ansible.builtin.systemd:
+        state: restarted
+        name: systemd-timesyncd
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Restart timedatectl(Rocky)    # timedatectl 서비스 재시작(Rocky)
+      ansible.builtin.systemd:
+        state: restarted
+        name: chronyd
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+
+
+- name: Update cloudimg for ssh(Ubuntu)   # Password Authentication SSH 허용(Ubuntu)
+  hosts: all
+  become: true
+  tasks:
+    - name: Verify if 'PasswordAuthentication yes' already exists   # Password Authentication가 활성화 되어 있는지 확인
+      ansible.builtin.shell: grep -c "PasswordAuthentication yes" /etc/ssh/sshd_config.d/60-cloudimg-settings.conf  || true
+      register: auth_yes
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Add config on cloudimg    # Password Authentication 비활성화 시 활성화로 변경
+      ansible.builtin.blockinfile:
+        dest: /etc/ssh/sshd_config.d/60-cloudimg-settings.conf
+        insertafter: 'PasswordAuthentication no'
+        block: |
+          PasswordAuthentication yes
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+        - auth_yes.stdout == "0"
+
+    - name: Remove deprecated line for sshd_config   # Password Authentication 비활성화 라인 제거
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config.d/60-cloudimg-settings.conf
+        state: absent
+        regexp: 'no'
+      ignore_errors: true
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Delete ansible block    # Ansible block 주석 제거
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config.d/60-cloudimg-settings.conf
+        state: absent
+        regexp: 'ANSIBLE'
+      ignore_errors: true
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Restart sshd    # Ubuntu 20,22용 ssh 서비스 재시작
+      ansible.builtin.systemd:
+        state: restarted
+        name: sshd
+      ignore_errors: true
+      when:
+        - (ansible_facts['distribution'] == "Ubuntu" and ansible_facts['distribution_major_version'] == "18") or (ansible_facts['distribution'] == "Ubuntu" and ansible_facts['distribution_major_version'] == "20") or (ansible_facts['distribution'] == "Ubuntu" and ansible_facts['distribution_major_version'] == "22")
+
+    - name: Restart sshd for ubuntu 24    # Ubuntu 24용 ssh 서비스 재시작
+      ansible.builtin.systemd:
+        state: restarted
+        name: ssh
+      ignore_errors: true
+      when: (ansible_facts['distribution'] == "Ubuntu" and ansible_facts['distribution_major_version'] == "24")
+
+
+- name: Update cloudimg for ssh(Rocky 9)    # Password Authentication SSH 허용(Rocky)
+  hosts: all
+  become: true
+  tasks:
+    - name: Verify if 'PasswordAuthentication yes' already exists   # Password Authentication가 활성화 되어 있는지 확인
+      ansible.builtin.shell: grep -c "PasswordAuthentication yes" /etc/ssh/sshd_config.d/50-cloud-init.conf  || true
+      register: auth_yes_rocky
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: Add config on cloudimg    # Password Authentication 비활성화 시 활성화로 변경
+      ansible.builtin.blockinfile:
+        dest: /etc/ssh/sshd_config.d/50-cloud-init.conf
+        insertafter: 'PasswordAuthentication no'
+        block: |
+          PasswordAuthentication yes
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+        - auth_yes_rocky.stdout == "0"
+
+    - name: Remove deprecated line for sshd_config    # Password Authentication 비활성화 라인 제거
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config.d/50-cloud-init.conf
+        state: absent
+        regexp: 'no'
+      ignore_errors: true
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: Delete for sshd_config    # Ansible block 주석 제거
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config.d/50-cloud-init.conf
+        state: absent
+        regexp: 'ANSIBLE'
+      ignore_errors: true
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: Restart sshd    # ssh 서비스 재시작
+      ansible.builtin.systemd:
+        state: restarted
+        name: sshd
+      ignore_errors: true
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+
+- name: Set Time Zone   # Timezone 동기화(KST)
+  hosts: all
+  become: true
+  vars:                 # 사전에 사용 할 변수 지정
+  - my_zone: 'Asia/Seoul'
+
+  tasks:
+    - name: Show facts available on the system    # ansible_facts 조회
+      ansible.builtin.debug:
+        var: ansible_facts
+
+    - name: Check current timezone    # 현재 서버 timezone 확인
+      ansible.builtin.shell: cat /etc/timezone
+      register: current_zone_deb
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Display output of current timezone    # 현재 서비 timezone 표시
+      ansible.builtin.debug:
+        var: current_zone_deb.stdout_lines
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Check current timezone    # 현재 서버 timezone 확인
+      ansible.builtin.shell: cat /etc/localtime
+      register: current_zone_red
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: Display output of current timezone    # 현재 서비 timezone 표시
+      ansible.builtin.debug:
+        var: current_zone_red.stdout_lines
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: Set timezone variables    # timezone용 변수 지정
+      ansible.builtin.copy: content={{my_zone}}
+            dest=/etc/timezone
+            owner=root
+            group=root
+            mode=0644
+            backup=yes
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+        - current_zone_deb.stdout != my_zone
+      notify:
+        - update timezone
+
+    - name: Ensure correct timezone link is set   # timezone 설정파일 symbolic link 생성
+      ansible.builtin.file:
+        src: '/usr/share/zoneinfo/{{my_zone}}'
+        dest: /etc/localtime
+        owner: root
+        group: root
+        state: link
+      when:
+        - ansible_facts['distribution'] == "Ubuntu"
+
+    - name: Set timezone to Asia/Seoul    # timezone Asia/Seoul로 지정
+      community.general.timezone:
+        name: Asia/Seoul
+      when:
+        - ansible_facts['distribution'] == "Rocky"
+
+    - name: Display output of updated timezone    # Up-to-date timezone 결과값 변수로 지정
+      ansible.builtin.shell: timedatectl | grep "Time zone"
+      register: modified_zone
+
+    - name: Display output of modified timezone   # Up-to-date timezone 표시
+      ansible.builtin.debug:
+        var: modified_zone.stdout_lines
+
+    - name: restart ryslog
+      ansible.builtin.systemd:
+        state: restarted
+        name: rsyslog
+      when:
+        - ansible_facts['distribution'] == "Rocky" or ansible_facts['distribution'] == "Ubuntu"
+
+  handlers:
+    - name: update timezone   # timezone 설정 적용
+      command: dpkg-reconfigure --frontend noninteractive tzdata

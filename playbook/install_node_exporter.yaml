@@ -1,0 +1,109 @@
+- name: Install KC-Node-Exporter    # KC인프라용 node exporter 설치(prometheus 모니터링용)
+  hosts: all
+  become: true 
+  gather_facts: true
+  tasks:
+    # - name: Check if kc_node_exporter zip exists    # KC node exporter 설치 패키지 존재 유무 확인
+    #   ansible.builtin.stat:
+    #     path: /home/scv/node_exporter-1.6.0.linux-amd64/node_exporter
+    #   register: kc_node_exporter
+
+    # - name: Download and unextract kc_node_exporter package   # KC node exporter 없을 시 패키지 다운로드 및 압축 해제
+    #   ansible.builtin.unarchive:
+    #     src: https://github.com/prometheus/node_exporter/releases/download/v1.6.0/node_exporter-1.6.0.linux-amd64.tar.gz
+    #     dest: /home/scv
+    #   when:
+    #     not kc_node_exporter.stat.exists
+
+    - name: Determine available users   # OS 유저 정보 확인
+      getent:
+        database: passwd
+
+    - name: Set fact when node_exporter exists    # node_exporter OS 유저 있을 시 변수 지정
+      set_fact:
+        user_exists: true
+      when: '"node_exporter" in item.key'
+      loop: "{{ ansible_facts.getent_passwd | dict2items }}"
+
+    - name: Set fact when node_exporter does not exists   # node_exporter OS 유저 없을 시 변수 지정
+      set_fact:
+        user_exists: false
+      when: '"node_exporter" not in item.key'
+      loop: "{{ ansible_facts.getent_passwd | dict2items }}"
+
+    - name: Add user for node_exporter    # OS 유저 'node exporter' 생성
+      ansible.builtin.user:
+        name: node_exporter
+        create_home: false
+        system: true
+        shell: /bin/false
+      when:
+        not user_exists
+
+    - name: Check if kc_node_exporter directory exists    # node exporter용 실행 파일 디렉터리 존재 유무 확인 
+      ansible.builtin.stat:
+        path: /usr/local/bin/node_exporter
+      register: kc_node_exporter_directory
+
+    - name: Search deprecated node_exporter daemon    # Deprecated된 node_exporter 서비스 조회
+      ansible.builtin.find:
+        paths: /etc/systemd/system/
+        patterns: "^node_exporter.*"
+        use_regex: true
+        file_type: file
+      register: unused_node_exporter_data
+
+    - name: Remove unused node_exporter data    # Deprecated된 node_exporter 서비스 자원 제거
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      with_items: "{{ unused_node_exporter_data.files }}"
+
+    - name: Copy node_exporter configs to /usr/local/bin    # Up-to-date node_exporter config 생성
+      ansible.builtin.copy:
+        src: /home/scv/node_exporter-1.6.0.linux-amd64/node_exporter
+        dest: /usr/local/bin
+        remote_src: true
+      when: not kc_node_exporter_directory.stat.exists
+
+    - name: Change file ownership, group and permissions of node_exporter   # node_exporter 서비스 권한 변경
+      ansible.builtin.file:
+        path: /usr/local/bin/node_exporter
+        owner: node_exporter
+        group: node_exporter
+        mode: 0755
+
+    - name: Import environment variable for node exporter(for monitoring systemd service)
+      ansible.builtin.copy:
+        src: /etc/ansible/roles/node_exporter_lb
+        dest: /etc/default
+        owner: root
+        group: root
+        mode: '0644'   
+
+    - name: Check if kc_node_exporter daemon exists   # node_exporter 데몬 서비스 존재 유무 확인
+      ansible.builtin.stat:
+        path: /etc/systemd/system/node_exporter.service
+      register: kc_node_exporter_service
+      ignore_errors: true
+
+    - name: Copy systemd service file to server   # Up-to-date node_exporter 서비스 생성
+      ansible.builtin.copy:
+        src: /etc/ansible/roles/node_exporter.service
+        dest: /etc/systemd/system
+        # remote_src: true
+      when: not kc_node_exporter_service.stat.exists
+
+    - name: Force systemd to reread configs   # 서비스 데몬 리로드
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Restart node_exporter   # node exporter 서비스 재시작
+      ansible.builtin.systemd:
+        state: restarted
+        name: node_exporter
+
+    - name: Enable node_exporter    # node exporter 서비스 활성화
+      ansible.builtin.systemd:
+        name: node_exporter
+        enabled: true

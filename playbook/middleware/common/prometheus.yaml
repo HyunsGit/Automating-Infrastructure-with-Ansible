@@ -1,0 +1,112 @@
+---
+- name: Install Prometheus
+  hosts: all
+  become: true
+  tasks:
+    - name: update package
+      ansible.builtin.apt:
+        name: "*"
+        state: latest
+    - name: update and upgrade apt packages
+      ansible.builtin.apt:
+        upgrade: true
+        update_cache: true
+        cache_valid_time: 86400
+    - name: download and unextract prometheus binary
+      ansible.builtin.unarchive:
+        src: https://github.com/prometheus/prometheus/releases/download/v2.2.1/prometheus-2.2.1.linux-amd64.tar.gz
+        dest: /home/ubuntu
+        remote_src: true
+    - name: add user for prometheus
+      ansible.builtin.user:
+        name: prometheus
+        create_home: false
+        system: true
+        shell: /bin/false
+    - name: copy prometheus configs to /usr/local/bin
+      ansible.builtin.copy:
+        src: /home/ubuntu/prometheus-2.2.1.linux-amd64/prometheus
+        dest: /usr/local/bin
+        remote_src: true
+    - name: copy promtool configs to /usr/local/bin
+      ansible.builtin.copy:
+        src: /home/ubuntu/prometheus-2.2.1.linux-amd64/promtool
+        dest: /usr/local/bin
+        remote_src: true
+    - name: change file ownership, group and permissions of prometheus
+      ansible.builtin.file:
+        path: /usr/local/bin/prometheus
+        owner: prometheus
+        group: prometheus
+        mode: 0755
+    - name: change file ownership, group and permissions of promtool
+      ansible.builtin.file:
+        path: /usr/local/bin/promtool
+        owner: prometheus
+        group: prometheus
+        mode: 0755
+    - name: copy consoles_libraries to /etc/prometheus
+      ansible.builtin.copy:
+        src: /home/ubuntu/prometheus-2.2.1.linux-amd64/console_libraries
+        dest: /etc/prometheus
+        remote_src: true
+    - name: change directory ownership, group and permissions of console_libraries
+      ansible.builtin.file:
+        path: /etc/prometheus/console_libraries
+        state: directory
+        recurse: true
+        owner: prometheus
+        group: prometheus
+        mode: 0757
+    - name: create /var/lib/prometheus directory
+      ansible.builtin.file:
+        path: /var/lib/prometheus
+        state: directory
+        mode: 0757
+    - name: search unused prometheus data
+      ansible.builtin.find:
+        paths: /home/ubuntu/
+        patterns: "^prometheus.*"
+        use_regex: true
+        file_type: directory
+      register: unused_prometheus_data
+    - name: remove unused prometheus data
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      with_items: "{{ unused_prometheus_data.files }}"
+    - name: copy prometheus.yml to prometheus server
+      ansible.builtin.copy:
+        src: /etc/ansible/roles/prometheus.yml
+        dest: /etc/prometheus/prometheus.yml
+    - name: copy prometheus.service to prometheus server
+      ansible.builtin.copy:
+        src: /etc/ansible/roles/prometheus.service
+        dest: /etc/systemd/system/prometheus.service
+    - name: force systemd to reread configs
+      ansible.builtin.systemd:
+        daemon_reload: yes
+    - name: restart prometheus
+      ansible.builtin.systemd:
+        state: restarted
+        name: prometheus
+      ignore_errors: true
+    - name: enable prometheus
+      ansible.builtin.systemd:
+        name: prometheus
+        enabled: true
+      ignore_errors: true
+    - name: verify prometheus installation
+      ansible.builtin.shell: systemctl status prometheus | grep Active
+      register: prometheus_status
+      ignore_errors: true
+    - name: display prometheus status
+      ansible.builtin.debug:
+        var: prometheus_status.stdout_lines
+
+    # - name: copy ansible.log
+    #   ansible.builtin.command: mv /etc/ansible/logs/daily.log /etc/ansible/logs/{{ lookup('pipe', 'date +%m_%d_%y') }}/{{ lookup('pipe', 'date +%m%d%y.%H:%M:%S') }}.log
+    #   connection: local
+    #   ignore_errors: true
+    #   when:
+    #     - inventory_hostname in groups.ops_log

@@ -1,0 +1,120 @@
+---
+- name: Install and configure Puppet agent on Ubuntu Jammy
+  hosts: all
+  become: true
+  vars:
+    puppet_release_pkg_url: "https://apt.puppetlabs.com/puppet8-release-jammy.deb"
+    puppet_release_pkg_path: "/tmp/puppet8-release-jammy.deb"
+
+    puppet_master_fqdn: "infra-iet-puppet-master-01.internal.example.com"   # override in inventory/group_vars
+    puppet_environment: "production"
+    puppet_runinterval: "30m"
+
+  tasks:
+    - name: Download Puppet 8 release package
+      ansible.builtin.get_url:
+        url: "{{ puppet_release_pkg_url }}"
+        dest: "{{ puppet_release_pkg_path }}"
+        mode: "0644"
+
+    - name: Install Puppet 8 APT repo
+      ansible.builtin.apt:
+        deb: "{{ puppet_release_pkg_path }}"
+        state: present
+
+    - name: Update all packages to their latest version
+      ansible.builtin.shell: apt update -y
+      ignore_errors: true
+
+    - name: Install puppet-agent
+      ansible.builtin.apt:
+        name: puppet-agent
+        state: present
+
+    - name: Ensure puppet.conf directory exists
+      ansible.builtin.file:
+        path: /etc/puppetlabs/puppet
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Set puppet_environment based on inventory_hostname
+      ansible.builtin.set_fact:
+        puppet_environment_effective: >-
+          {% if '-pi' in inventory_hostname %}
+          pi
+          {% elif 'sandbox' in inventory_hostname or 'sbox' in inventory_hostname %}
+          sandbox
+          {% else %}
+          production
+          {% endif %}
+          
+    - name: Debug phase detection
+      debug:
+        msg: "Detected phase: {{ puppet_environment_effective }} for {{ inventory_hostname }}"
+
+    - name: Configure /etc/puppetlabs/puppet/puppet.conf
+      ansible.builtin.copy:
+        dest: /etc/puppetlabs/puppet/puppet.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [main]
+          certname = {{ inventory_hostname }}.internal.example.com
+          server = {{ puppet_master_fqdn }}
+          environment = {{ puppet_environment }}
+          runinterval = {{ puppet_runinterval }}
+
+          [agent]
+          include_legacy_facts = true
+          splay = true
+          splaylimit = 30m
+
+    - name: Ensure puppet service is enabled and started
+      ansible.builtin.service:
+        name: puppet
+        enabled: true
+        state: started
+
+- name: Deploy Facter NTP facts script
+  hosts: all
+  become: true
+  tasks:
+    - name: Create /etc/facter/facts.d directory
+      ansible.builtin.file:
+        path: /etc/facter/facts.d
+        state: directory
+        mode: '0755'
+
+    - name: Deploy enhanced NTP facts script
+      ansible.builtin.copy:
+        content: |
+          #!/bin/bash
+          # NTP Servers
+          if command -v timedatectl >/dev/null 2>&1; then
+            servers=$(timedatectl show-timesync --property=ServerName --value 2>/dev/null)
+            [ -n "$servers" ] && echo "ntp_server_name=$servers"
+            
+            fallbacks=$(timedatectl show-timesync --property=FallbackNTPServers --value 2>/dev/null)
+            [ -n "$fallbacks" ] && echo "ntp_fallback_servers=$fallbacks"
+          fi
+          
+          # NTP Service Status (timesyncd/chronyd/ntpd)
+          if systemctl is-active --quiet systemd-timesyncd >/dev/null 2>&1; then
+            echo "ntp_service_active=true"
+            echo "ntp_service_name=systemd-timesyncd"
+          elif systemctl is-active --quiet chronyd >/dev/null 2>&1; then
+            echo "ntp_service_active=true"
+            echo "ntp_service_name=chronyd"
+          elif systemctl is-active --quiet ntpd >/dev/null 2>&1; then
+            echo "ntp_service_active=true"
+            echo "ntp_service_name=ntpd"
+          else
+            echo "ntp_service_active=false"
+            echo "ntp_service_name=none"
+          fi
+        dest: /etc/facter/facts.d/gather_ntp_facts.sh
+        mode: '0755'
+        backup: yes

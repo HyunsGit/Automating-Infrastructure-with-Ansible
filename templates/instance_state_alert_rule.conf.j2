@@ -1,0 +1,40 @@
+groups:
+- name: instance.state
+{% filter indent(width=2, first=true) %}
+rules:
+- alert: kicm-csp-prod-fia-nat-01-InstanceDown
+{% filter indent(width=2, first=true) %}
+expr: up{instance="210.109.52.186:39100"} == 0
+for: 5s
+{% endfilter %}
+{% endfilter %}
+{% filter indent(width=2, first=true) %}
+- alert: kicm-csp-prod-fia-forward-01-InstanceDown
+{% filter indent(width=2, first=true) %}
+expr: up{instance="210.109.53.189:39100"} == 0
+for: 5s
+{% endfilter %}
+{% endfilter %}
+{% filter indent(width=2, first=true) %}
+- alert: kicm-csp-cbt-fia-nat-01-InstanceDown
+{% filter indent(width=2, first=true) %}
+expr: up{instance="61.109.236.62:39100"} == 0
+for: 5s
+{% endfilter %}
+{% endfilter %}
+{% filter indent(width=2, first=true) %}
+- alert: kicm-csp-cbt-fia-forward-01-InstanceDown
+{% filter indent(width=2, first=true) %}
+expr: up{instance="61.109.239.146:39100"} == 0
+for: 5s
+{% endfilter %}
+{% endfilter %}
+{% filter indent(width=2, first=true) %}
+{% for host in ansible_play_hosts %}
+- alert: {{ host }}-InstanceDown
+{% filter indent(width=2, first=true) %}
+expr: up{instance="{{ host }}:39100"} == 0
+for: 5s
+{% endfilter %}
+{% endfor %}
+{% endfilter %}

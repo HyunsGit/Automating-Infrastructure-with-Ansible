@@ -1,0 +1,99 @@
+---
+- name: Install and configure Puppet Agent on Rocky Linux 8/9
+  hosts: all
+  become: yes
+  gather_facts: yes
+  vars:
+    puppet_master_fqdn: puppet-master.internal.example.com
+    puppet_environment: production
+    puppet_runinterval: 1h
+
+  tasks:
+    - name: Update metadata cache
+      dnf:
+        update_cache: yes
+
+    - name: Install libxcrypt-compat for Rocky 9 ONLY
+      dnf:
+        name: libxcrypt-compat
+        state: present
+        enablerepo: appstream
+      when: ansible_distribution_major_version == "9"
+
+    - name: Create libcrypt.so.2 symlink for Rocky 8
+      file:
+        src: /lib64/libcrypt.so.1
+        dest: /lib64/libcrypt.so.2
+        state: link
+        force: yes
+      when: ansible_distribution_major_version == "8"
+
+    - name: Download Puppet GPG key
+      get_url:
+        url: https://yum.puppet.com/RPM-GPG-KEY-puppet
+        dest: /etc/pki/rpm-gpg/RPM-GPG-KEY-puppet
+        mode: '0644'
+
+    - name: Import Puppet GPG key
+      ansible.builtin.rpm_key:
+        key: /etc/pki/rpm-gpg/RPM-GPG-KEY-puppet
+        state: present
+
+    - name: Install CORRECT Puppet release package by OS version
+      block:
+        - name: Puppet 7 for Rocky 9
+          dnf:
+            name: "https://yum.puppet.com/puppet7-release-el-9.noarch.rpm"
+            state: present
+          when: ansible_distribution_major_version == "9"
+
+        - name: Puppet 6 for Rocky 8 (GLIBC compatible)
+          dnf:
+            name: "https://yum.puppet.com/puppet6-release-el-8.noarch.rpm"
+            state: present
+          when: ansible_distribution_major_version == "8"
+
+    - name: Install puppet-agent
+      dnf:
+        name: puppet-agent
+        state: present
+
+    - name: Ensure puppet service is stopped before config
+      systemd:
+        name: puppet
+        state: stopped
+        enabled: no
+
+    - name: Configure /etc/puppetlabs/puppet/puppet.conf
+      blockinfile:
+        path: /etc/puppetlabs/puppet/puppet.conf
+        block: |
+          [main]
+          certname = {{ inventory_hostname }}.internal.example.com
+          server = {{ puppet_master_fqdn }}
+          environment = {{ puppet_environment }}
+          runinterval = {{ puppet_runinterval }}
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - DO NOT EDIT"
+        backup: yes
+      register: puppet_config
+
+    - name: Remove puppet agent lockfile if exists
+      file:
+        path: /opt/puppetlabs/puppet/cache/state/agent_catalog_run.lock
+        state: absent
+
+    # - name: Puppet SSL bootstrap (request CA cert)
+    #   command: /opt/puppetlabs/bin/puppet ssl bootstrap
+    #   register: ssl_bootstrap
+    #   failed_when: ssl_bootstrap.rc not in [0, 2]
+    #   changed_when: ssl_bootstrap.rc == 0
+    #   retries: 3
+    #   delay: 10
+
+    - name: Enable and start puppet service
+      systemd:
+        name: puppet
+        state: started
+        enabled: yes
+      when: puppet_config.changed or ssl_bootstrap.changed
+

@@ -1,0 +1,84 @@
+---
+- name: Apply Mountpoint
+  hosts: all
+  become: yes
+  gather_facts: true
+  vars_prompt:
+    - name: path
+      prompt: "local_path(NFS주소와 매핑 할 로컬 디렉터리): "
+      private: false
+      unsafe: true
+    - name: src
+      prompt: "remote_nfs_path(NFS주소): "
+      private: false
+  tasks:
+      # - name: Update package(Ubuntu)
+      #   ansible.builtin.apt:
+      #     upgrade: yes
+      #     update_cache: yes
+      #     cache_valid_time: 86400 #One day
+      - name: Gather the package facts
+        ansible.builtin.package_facts:
+          manager: auto
+        when:
+          - ansible_facts['distribution'] == "Rocky" or ansible_facts['distribution'] == "Ubuntu"
+        ignore_errors: true
+      - name: Print the package facts
+        ansible.builtin.debug:
+          var: ansible_facts.packages
+        when:
+          - ansible_facts['distribution'] == "Rocky" or ansible_facts['distribution'] == "Ubuntu"
+        ignore_errors: true 
+      - name: download package for nfs(rocky)
+        ansible.builtin.dnf:
+          name: nfs-utils
+          state: latest
+        ignore_errors: true
+        when:
+          - ansible_facts['distribution'] == "Rocky"
+          # - "'nfs-utils' in ansible_facts.packages"
+      - name: download package for nfs(ubuntu)
+        ansible.builtin.apt:
+          name: nfs-common
+          state: present
+        ignore_errors: true
+        when:
+          - ansible_facts['distribution'] == "Ubuntu"
+          # - "'nfs-common' in ansible_facts.packages"
+
+      - name: create a directory if it does not exist
+        ansible.builtin.file:
+          path: "{{ path }}"
+          state: directory
+          owner: root
+          group: root
+          mode: '0755'
+        when:
+          - ansible_facts['distribution'] == "Rocky" or ansible_facts['distribution'] == "Ubuntu"
+        ignore_errors: true  
+      - name: delete ansible block
+        ansible.builtin.lineinfile:
+          path: /etc/fstab
+          state: absent
+          regexp: '10.203.8.82'
+        ignore_errors: true
+        when:
+          - ansible_facts['distribution'] == "Rocky" or ansible_facts['distribution'] == "Ubuntu"
+
+      - name: mount the nfsshare in client side
+        mount:
+          fstype: nfs4
+          opts: defaults
+          dump: '0'
+          passno: '0'
+          state: mounted
+          src: "{{ src }}"
+          path: "{{ path }}"
+        when:
+          - ansible_facts['distribution'] == "Rocky" or ansible_facts['distribution'] == "Ubuntu"
+        ignore_errors: true
+
+      - name: copy ansible.log
+        ansible.builtin.command: mv /etc/ansible/logs/daily.log /etc/ansible/logs/{{ lookup('pipe', 'date +%m_%d_%y') }}/{{ lookup('pipe', 'date +%m%d%y.%H:%M:%S') }}.log
+        connection: local
+        ignore_errors: true

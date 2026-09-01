@@ -1,0 +1,85 @@
+---
+- name: Install filebeats for LB
+  hosts: all
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Download filebeat package
+      ansible.builtin.get_url:
+        url: https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-7.17.18-amd64.deb
+        dest: /home/ubuntu
+
+    - name: Install filebeat via dpkg
+      ansible.builtin.apt:
+        deb: /home/ubuntu/filebeat-7.17.18-amd64.deb
+
+    - name: Create lb-filebeat directory
+      ansible.builtin.file:
+        path: /etc/filebeat/lb-config
+        state: directory
+        mode: "0755"
+
+    - name: Configure lb-filebeat directory
+      ansible.builtin.copy:
+        src: /etc/filebeat/modules.d
+        dest: /etc/filebeat/lb-config
+        owner: root
+        group: root
+        mode: "0644"
+        remote_src: true
+    
+    - name: Remove old lb-filebeat configuration
+      ansible.builtin.file:
+        path: "/etc/filebeat/lb-config/lb-filebeat.yml"
+        state: absent
+      ignore_errors: true
+    
+    - name: Copy lb-filebeat configuration
+      ansible.builtin.copy:
+        src: /etc/ansible/roles/lb-filebeat.yml
+        dest: /etc/filebeat/lb-config/lb-filebeat.yml
+
+    - name: Check if lb_filebeat daemon exists
+      ansible.builtin.stat:
+        path: /lib/systemd/system/lb-filebeat.service
+      register: lb_filebeat
+      ignore_errors: true
+
+    - name: Check mdata for /lib/systemd/system/lb-filebeat.service
+      ansible.builtin.shell: "date -r /lib/systemd/system/lb-filebeat.service +%s"
+      register: bmdate
+      changed_when: not lb_filebeat.stat.exists
+      ignore_errors: true
+
+    - name: Remove old lb-filebeat daemon
+      ansible.builtin.file:
+        path: "/lib/systemd/system/lb-filebeat.service"
+        state: absent
+      ignore_errors: true
+
+    - name: Configure lb-filebeat daemon
+      ansible.builtin.copy:
+        src: /etc/ansible/roles/lb-filebeat.service
+        dest: /lib/systemd/system/lb-filebeat.service
+    
+    - name: Check mdate for /lib/systemd/system/lb-filebeat.service
+      ansible.builtin.shell: "date -r /lib/systemd/system/lb-filebeat.service +%s"
+      register: amdate
+      changed_when: not lb_filebeat.stat.exists
+      ignore_errors: true
+
+    - name: Force systemd to reread configs
+      ansible.builtin.systemd:
+        daemon_reload: true
+      
+    - name: Restart lb-filebeat
+      ansible.builtin.systemd:
+        state: restarted
+        name: lb-filebeat
+
+    - name: Enable lb-filebeat
+      ansible.builtin.systemd:
+        name: lb-filebeat
+        enabled: true
+
+    

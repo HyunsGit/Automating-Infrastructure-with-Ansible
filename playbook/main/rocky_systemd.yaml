@@ -1,0 +1,35 @@
+---
+- name: Disable systemd timers only
+  hosts: all
+  become: true
+  
+  tasks:
+    - name: Check if dnf-makecache.timer exists and is active
+      ansible.builtin.command:
+        cmd: systemctl is-active dnf-makecache.timer
+      register: timer_active
+      failed_when: false
+      changed_when: false
+      
+    - name: Check if dnf-makecache.timer is enabled
+      ansible.builtin.command:
+        cmd: systemctl is-enabled dnf-makecache.timer
+      register: timer_enabled
+      failed_when: false
+      changed_when: false
+    
+    - name: Stop dnf-makecache.timer if active
+      ansible.builtin.systemd:
+        name: dnf-makecache.timer
+        state: stopped
+      when: timer_active.stdout == "active"
+      
+    - name: Disable dnf-makecache.timer if enabled
+      ansible.builtin.systemd:
+        name: dnf-makecache.timer
+        enabled: false
+      when: timer_enabled.stdout == "enabled"
+      
+    - name: Display timer status
+      ansible.builtin.debug:
+        msg: "Timer was {{ timer_active.stdout }} and {{ timer_enabled.stdout }}"

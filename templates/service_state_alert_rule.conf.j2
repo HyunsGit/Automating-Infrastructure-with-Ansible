@@ -1,0 +1,47 @@
+groups:
+- name: service.state
+{% filter indent(width=2, first=true) %}
+rules:
+- alert: infra-grafana-01-GrafanaDown
+{% filter indent(width=2, first=true) %}
+expr: node_systemd_unit_state{instance="infra-grafana-01:39100",name="grafana-server.service",state="active"} == 0
+for: 5s
+{% endfilter %}
+{% endfilter %}
+{% filter indent(width=2, first=true) %}
+- alert: kicm-csp-prod-fia-nat-01-MonitoringAgentDown
+{% filter indent(width=2, first=true) %}
+expr: node_systemd_unit_state{instance="kicm-csp-prod-fia-nat-01:39100",name="kic_monitor_agent.service",state="active"} == 0
+for: 5s
+{% endfilter %}
+{% endfilter %}
+{% filter indent(width=2, first=true) %}
+- alert: kicm-csp-prod-fia-forward-01-MonitoringAgentDown
+{% filter indent(width=2, first=true) %}
+expr: node_systemd_unit_state{instance="kicm-csp-prod-fia-forward-01:39100",name="kic_monitor_agent.service",state="active"} == 0
+for: 5s
+{% endfilter %}
+{% endfilter %}
+{% filter indent(width=2, first=true) %}
+- alert: kicm-csp-cbt-fia-nat-01-MonitoringAgentDown
+{% filter indent(width=2, first=true) %}
+expr: node_systemd_unit_state{instance="kicm-csp-cbt-fia-nat-01:39100",name="kic_monitor_agent.service",state="active"} == 0
+for: 5s
+{% endfilter %}
+{% endfilter %}
+{% filter indent(width=2, first=true) %}
+- alert: kicm-csp-cbt-fia-forward-01-MonitoringAgentDown
+{% filter indent(width=2, first=true) %}
+expr: node_systemd_unit_state{instance="kicm-csp-cbt-fia-forward-01:39100",name="kic_monitor_agent.service",state="active"} == 0
+for: 5s
+{% endfilter %}
+{% endfilter %}
+{% filter indent(width=2, first=true) %}
+{% for host in ansible_play_hosts %}
+- alert: {{ host }}-MonitoringAgentDown
+{% filter indent(width=2, first=true) %}
+expr: node_systemd_unit_state{instance="{{ host }}:39100",name="kic_monitor_agent.service",state="active"} == 0
+for: 5s
+{% endfilter %}
+{% endfor %}
+{% endfilter %}

@@ -1,0 +1,14 @@
+---
+- name: Check SSH Connectivity to All Hosts
+  hosts: all
+  gather_facts: true
+  become: true
+  tasks:
+      - name: Check SSH connectivity
+        ansible.builtin.ping:
+        register: ssh_result
+        ignore_errors: true
+
+      - name: Print SSH connectivity result
+        ansible.builtin.debug:
+          msg: "{{ 'SSH OK: ' + inventory_hostname if ssh_result.ping == 'pong' else 'SSH FAILED: ' + inventory_hostname }}"

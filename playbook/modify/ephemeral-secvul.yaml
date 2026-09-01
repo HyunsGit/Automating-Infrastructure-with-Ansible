@@ -1,0 +1,92 @@
+---
+- name: passwordComplexity(U02)
+  hosts: all
+  become: true
+  tasks:
+    # - name: find /etc/cron relevant config(U22-3)
+    #   find:
+    #     paths: /etc
+    #     patterns: 
+    #       - "cron*"
+    #     file_type: directory
+    #   register: cron
+    # - set_fact:
+    #     cron_config: "{{ cron.files | map(attribute='path') | list}}"
+    # - name: change permission & ownership of /etc/cron relevant config(U22-4)
+    #   file:
+    #     path: "{{ item }}"
+    #     state: directory
+    #     recurse: true
+    #     owner: root
+    #     mode: 0640
+    #   with_items: "{{ cron_config }}"
+    # - name: Change file ownership, group and permissions
+    #   ansible.builtin.file:
+    #     path: /etc/crontab
+    #     owner: root
+    #     group: root
+    #     mode: '0640'
+    # - name: Change file ownership, group and permissions
+    #   ansible.builtin.file:
+    #     path: /etc/cron.deny
+    #     owner: root
+    #     group: root
+    #     mode: '0640'
+
+    - name: ch
+      ansible.builtin.shell: sudo chmod -s {{ item.src }}
+      loop:
+        - { src: /usr/bin/chage }
+        - { src: /usr/bin/gpasswd }
+        - { src: /usr/bin/newgrp }
+        - { src: /usr/bin/su }
+        - { src: /usr/bin/write }
+        - { src: /usr/bin/mount }
+        - { src: /usr/bin/umount }
+        - { src: /usr/bin/pkexec }
+        - { src: /usr/bin/crontab }
+        - { src: /usr/bin/sudo }
+        - { src: /usr/bin/passwd }
+        - { src: /usr/sbin/pam_timestamp_check }
+        - { src: /usr/sbin/unix_chkpwd }
+        - { src: /usr/sbin/grub2-set-bootflag }
+        - { src: /usr/sbin/mount.nfs }
+        - { src: /usr/lib/polkit-1/polkit-agent-helper-1 }
+        - { src: /usr/libexec/utempter/utempter }
+        - { src: /usr/libexec/openssh/ssh-keysign }
+        - { src: /usr/libexec/cockpit-session }
+    # - name: Change file ownership, group and permissions
+    #   ansible.builtin.file:
+    #     path: /home/scv
+    #     state: directory
+    #     recurse: yes
+    #     owner: scv
+    #     group: scv
+    # - name: Change file ownership, group and permissions
+    #   ansible.builtin.file:
+    #     path: /home/probe
+    #     state: directory
+    #     recurse: yes
+    #     owner: probe
+    #     group: probe
+    # - name: Change file ownership, group and permissions
+    #   ansible.builtin.file:
+    #     path: /home/drone
+    #     state: directory
+    #     recurse: yes
+    #     owner: drone
+    #     group: drone
+    # - name: Change file ownership, group and permissions
+    #   ansible.builtin.file:
+    #     path: /home/marine
+    #     state: directory
+    #     recurse: yes
+    #     owner: marine
+    #     group: marine
+    # - name: Change file ownership, group and permissions
+    #   ansible.builtin.file:
+    #     path: /home/zealot
+    #     state: directory
+    #     recurse: yes
+    #     owner: zealot
+    #     group: zealot

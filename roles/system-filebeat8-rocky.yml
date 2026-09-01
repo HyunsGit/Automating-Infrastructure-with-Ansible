@@ -1,0 +1,51 @@
+filebeat.inputs:
+- type: log
+  enabled: true
+  backoff: 1s
+  max_backoff: 5s
+  paths:
+    - /var/log/messages
+  fields:
+    log_type: system-log
+    system: true
+
+filebeat.config.modules:
+  path: ${path.config}/modules.d/*.yml
+  reload.enabled: false
+
+output.logstash:
+  hosts: ["elasticsearch.internal.example.com:35040"]
+
+logging.level: info
+logging.to_stderr: false
+logging.to_syslog: false
+logging.to_files: true
+logging.files:
+  path: /var/log/filebeat-8.17
+  name: filebeat
+  keepfiles: 5
+  permissions: 0644
+
+processors:
+  - add_host_metadata:
+      when.not.contains.tags: forwarded
+  - script:
+      lang: javascript
+      id: filter_ipv4
+      source: >
+        function process(event) {
+            var ips = event.Get("host.ip");
+            if (ips && ips.length > 0) {
+                var ipv4_only = [];
+                for (var i = 0; i < ips.length; i++) {
+                    // 콜론(:)이 없는 IPv4만 필터링
+                    if (ips[i].indexOf(":") === -1) {
+                        ipv4_only.push(ips[i]);
+                    }
+                }
+                // 배열 중 첫 번째 IPv4 주소만 단일 문자열로 저장
+                if (ipv4_only.length > 0) {
+                    event.Put("host.ip", ipv4_only[0]);
+                }
+            }
+        }

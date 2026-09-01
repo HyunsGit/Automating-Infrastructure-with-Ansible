@@ -1,0 +1,101 @@
+---
+- name: Configure fstrim.timer on Ubuntu based on timezone
+  hosts: all
+  become: yes
+  gather_facts: yes
+  
+  vars:
+    fstrim_timer_dir: /etc/systemd/system/fstrim.timer.d
+    fstrim_override_file: "{{ fstrim_timer_dir }}/override.conf"
+  
+  tasks:
+    - name: Display OS and timezone information
+      debug:
+        msg: |
+          OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          Timezone: {{ ansible_date_time.tz }}
+      tags: debug
+
+    - name: Create fstrim.timer.d directory
+      file:
+        path: "{{ fstrim_timer_dir }}"
+        state: directory
+        mode: '0755'
+      tags: setup
+
+    - name: Create override.conf file
+      file:
+        path: "{{ fstrim_override_file }}"
+        state: touch
+        mode: '0644'
+      tags: setup
+
+    - name: Configure fstrim.timer for UTC timezone
+      copy:
+        content: |
+          [Timer]
+          OnCalendar=
+          OnCalendar=Sat *-*-* 17:00:00
+          RandomizedDelaySec=4h
+          AccuracySec=1s
+          Persistent=true
+        dest: "{{ fstrim_override_file }}"
+      when: ansible_date_time.tz == "UTC"
+      tags: config
+      register: utc_config_result
+
+    - name: Configure fstrim.timer for KST timezone
+      copy:
+        content: |
+          [Timer]
+          OnCalendar=
+          OnCalendar=Sun *-*-* 02:00:00
+          RandomizedDelaySec=4h
+          AccuracySec=1s
+          Persistent=true
+        dest: "{{ fstrim_override_file }}"
+      when: ansible_date_time.tz == "KST"
+      tags: config
+      register: kst_config_result
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+      tags: reload
+      register: daemon_reload_result
+
+    - name: Display daemon reload status
+      debug:
+        msg: "Systemd daemon reloaded successfully"
+      when: daemon_reload_result.changed
+      tags: debug
+
+    - name: Get fstrim.timer status and schedule
+      command: systemctl list-timers fstrim.timer
+      register: fstrim_timer_status
+      tags: verify
+      changed_when: false
+
+    - name: Display fstrim.timer configuration status
+      debug:
+        msg: "{{ fstrim_timer_status.stdout }}"
+      tags: verify
+
+    - name: Verify fstrim.timer is enabled and running
+      systemd:
+        name: fstrim.timer
+        enabled: yes
+        state: started
+      tags: verify
+      register: fstrim_timer_state
+
+    - name: Display final status
+      debug:
+        msg: |
+          fstrim.timer Configuration Complete
+          ===============================================
+          Timezone: {{ ansible_date_time.tz }}
+          Override config location: {{ fstrim_override_file }}
+          Timer state: {{ fstrim_timer_state.status.ActiveState }}
+          Timer enabled: {{ fstrim_timer_state.status.UnitFileState }}
+      tags: verify

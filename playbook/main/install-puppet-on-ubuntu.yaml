@@ -1,0 +1,91 @@
+---
+- name: Install and configure Puppet agent on Ubuntu 22.04/24.04
+  hosts: all
+  become: true
+  vars:
+    puppet_master_fqdn: "puppet-master.internal.example.com"   # override per inventory/group_vars
+    puppet_environment: "production"                 # override as needed
+    puppet_runinterval: "30m"                        # e.g. 30m, 1h, 1800 (seconds)
+
+  tasks:
+    - name: Set Puppet release package facts for Ubuntu versions
+      ansible.builtin.set_fact:
+        puppet_release_pkg_url: >-
+          {%- if ansible_distribution_major_version == "22" -%}
+          https://apt.puppetlabs.com/puppet8-release-jammy.deb
+          {%- elif ansible_distribution_major_version == "24" -%}
+          https://apt.puppet.com/puppet-release-noble.deb
+          {%- else -%}
+          ""
+          {%- endif -%}
+        puppet_release_pkg_path: >-
+          {%- if ansible_distribution_major_version == "22" -%}
+          /tmp/puppet8-release-jammy.deb
+          {%- elif ansible_distribution_major_version == "24" -%}
+          /tmp/puppet-release-noble.deb
+          {%- else -%}
+          ""
+          {%- endif -%}
+        puppet_config_dir: >-
+          {%- if ansible_distribution_major_version == "22" -%}
+          /etc/puppetlabs/puppet
+          {%- else -%}
+          /etc/puppet
+          {%- endif -%}
+      when: ansible_distribution == "Ubuntu" and ansible_distribution_major_version in ["22", "24"]
+
+    - name: Fail if not supported Ubuntu version
+      ansible.builtin.fail:
+        msg: "Unsupported Ubuntu version: {{ ansible_distribution_version }}. Only 22.04 (jammy) and 24.04 (noble) are supported."
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - ansible_distribution_major_version not in ["22", "24"]
+
+    - name: Download Puppet release package
+      ansible.builtin.get_url:
+        url: "{{ puppet_release_pkg_url }}"
+        dest: "{{ puppet_release_pkg_path }}"
+        mode: "0644"
+      when: puppet_release_pkg_url != ""
+
+    - name: Install Puppet APT repo
+      ansible.builtin.apt:
+        deb: "{{ puppet_release_pkg_path }}"
+        state: present
+      when: puppet_release_pkg_path != ""
+
+    - name: Update all packages to their latest version
+      ansible.builtin.shell: apt update -y
+      ignore_errors: true
+
+    - name: Install puppet-agent
+      ansible.builtin.apt:
+        name: puppet-agent
+        state: present
+
+    - name: Ensure puppet.conf directory exists
+      ansible.builtin.file:
+        path: "{{ puppet_config_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Configure puppet.conf
+      ansible.builtin.copy:
+        dest: "{{ puppet_config_dir }}/puppet.conf"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [main]
+          certname = {{ inventory_hostname }}.internal.example.com
+          server = {{ puppet_master_fqdn }}
+          environment = {{ puppet_environment }}
+          runinterval = {{ puppet_runinterval }}
+
+    - name: Ensure puppet service is enabled and started
+      ansible.builtin.service:
+        name: puppet
+        enabled: true
+        state: started

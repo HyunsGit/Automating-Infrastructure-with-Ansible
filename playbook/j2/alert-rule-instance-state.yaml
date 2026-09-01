@@ -1,0 +1,26 @@
+---
+- name: Template for Creating Rule Set for AlertManager
+  hosts: all
+  become: true
+  gather_facts: true
+  tasks:
+  - name: Create AlertManager Rule Set
+    template:
+      src: /etc/ansible/templates/instance_state_alert_rule.conf.j2
+      dest: /etc/prometheus/instance_state_rules.yml
+    delegate_to: infra-prometheus-01
+    ignore_errors: true
+
+  # - name: Reload Config for Prometheus Service
+  #   ansible.builtin.systemd:
+  #     state: restarted
+  #     name: prometheus
+  #   when:
+  #     - ansible_facts['hostname'] == 'infra-prometheus-01'
+
+  # - name: Reload Config for AlertManager Service
+  #   ansible.builtin.systemd:
+  #     state: restarted
+  #     name: alertmanager
+  #   when:
+  #     - ansible_facts['hostname'] == 'infra-prometheus-01'

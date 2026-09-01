@@ -1,0 +1,27 @@
+---
+- name: Check Time Zone
+  hosts: all
+  gather_facts: False
+  become: true
+  vars_prompt:
+    - name: project
+      prompt: "Enter current project: "
+      private: false
+
+  tasks:
+    - name: check current timezone
+      shell: timedatectl
+      register: current_zone
+    
+    - name: display output of current timezone
+      ansible.builtin.debug:
+        var: current_zone.stdout_lines
+      # failed_when:
+        # - "'Asia/Seoul' not in current_zone.stdout_lines"
+        # - "'+0900' not in current_zone.stdout_lines"
+
+    - name: Print output to file
+      ansible.builtin.copy:
+        content: "{{current_zone.stdout}}"
+        dest: /home/ubuntu/{{ project }}.txt
+      delegate_to: localhost

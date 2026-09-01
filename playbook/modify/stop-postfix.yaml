@@ -1,0 +1,16 @@
+---
+- name: stop postfix daemon
+  hosts: all
+  become: true
+  tasks:
+  - name: disable postfix service
+    ansible.builtin.systemd:
+      name: postfix
+      enabled: no
+      state: stopped
+    register: stop_service
+    failed_when:
+      - stop_service.failed == true
+      - '"Could not find the requested service" not in stop_service.msg'
+    # the order is important, only failed == true, there will be
+    # attribute 'msg' in the result
