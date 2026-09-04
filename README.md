@@ -1,7 +1,28 @@
 # Infrastructure Automation with Ansible
 
-> KakaoCloud 환경에서 Ansible을 사용해 **VM 초기 구성, 보안 강화, 모니터링 에이전트 배포, 인프라 상태 검증**을 자동화한 운영 플레이북 리스트.  
-> Puppet 기반 구성 관리와 병행하여, Puppet 전환 이전의 초기 프로비저닝과 원타임 작업에 Ansible을 활용.
+Table of Contents
+=================
+
+* [Infrastructure Automation with Ansible](#infrastructure-automation-with-ansible)
+  * [핵심 성과](#핵심-성과)
+  * [Overview](#overview)
+  * [OS 전략 및 Ansible의 한계](#os-전략-및-ansible의-한계)
+  * [Repository Structure](#repository-structure)
+  * [Playbook Categories](#playbook-categories)
+    * [1\. 표준 VM 초기 투입](#1-표준-vm-초기-투입)
+      * [Default\-Playbook\-V3\.yaml — 모든 OS 대상](#default-playbook-v3yaml--모든-os-대상)
+      * [TOBE\-Default\-Playbook\-V3\.yaml — Ubuntu 24\.04 (Puppet 적용 대상)](#tobe-default-playbook-v3yaml--ubuntu-2404-puppet-적용-대상)
+    * [2\. 보안 강화 (playbook/modify/)](#2-보안-강화-playbookmodify)
+    * [3\. 모니터링 스택 배포 (playbook/middleware/)](#3-모니터링-스택-배포-playbookmiddleware)
+    * [4\. 네트워크 / DNS / NTP (playbook/modify/)](#4-네트워크--dns--ntp-playbookmodify)
+    * [5\. 상태 검증 (playbook/verify/)](#5-상태-검증-playbookverify)
+    * [6\. Puppet 전환 지원 (playbook/main/)](#6-puppet-전환-지원-playbookmain)
+    * [7\. 감사 스크립트 (scripts/)](#7-감사-스크립트-scripts)
+  * [Security Notes](#security-notes)
+  * [Tech Stack](#tech-stack)
+
+> 클라우드 환경에서 Ansible을 사용해 **VM 초기 구성, 보안 강화, 모니터링 에이전트 배포, 인프라 상태 검증**을 자동화한 운영 플레이북 리스트.  
+> Puppet 기반 구성 관리와 병행하여, Puppet 전환 이전의 초기 프로비저닝과 반복적인 작업에 Ansible을 활용.
 
 ---
 
